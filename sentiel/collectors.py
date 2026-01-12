@@ -140,3 +140,32 @@ def parse_event_xml(xml: str) -> Event:
                 fields[el.tag.split("}")[-1]] = _num(el.text.strip())
     ts = datetime.fromisoformat(get("TimeCreated").get("SystemTime").rstrip("Z")[:26]).replace(tzinfo=UTC)
     return Event(ts=ts, source="windows", host=get("Computer").text or socket.gethostname(), fields=fields)
+
+
+def read_windows(state: dict, stats: Counter | None = None, channels=WINDOWS_CHANNELS) -> Iterator[Event]:
+    """New events per channel since the last EventRecordID (first run: last 24h)."""
+    if sys.platform != "win32":
+        return
+    import pywintypes
+    import win32evtlog
+
+    stats = stats if stats is not None else Counter()
+    for channel in channels:
+        last = state.get(channel)
+        query = (f"*[System[EventRecordID > {int(last)}]]" if last
+                 else "*[System[TimeCreated[timediff(@SystemTime) <= 86400000]]]")
+        try:
+            handle = win32evtlog.EvtQuery(channel, win32evtlog.EvtQueryForwardDirection, query)
+        except pywintypes.error as e:
+            if e.winerror == 5:
+                stats[f"denied:{channel}"] += 1
+            continue  # channel missing (e.g. no Sysmon) or no permission
+        while batch := win32evtlog.EvtNext(handle, 256):
+            for evt in batch:
+                try:
+                    ev = parse_event_xml(win32evtlog.EvtRender(evt, win32evtlog.EvtRenderEventXml))
+                except (ET.ParseError, AttributeError, ValueError, ValidationError):
+                    stats["skipped"] += 1
+                    continue
+                state[channel] = ev.fields["EventRecordID"]
+                yield ev
