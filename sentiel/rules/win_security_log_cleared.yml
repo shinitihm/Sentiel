@@ -1,0 +1,21 @@
+title: Security Event Log Cleared
+id: e317c199-887e-4526-b254-28c5ac4d2c8d
+status: experimental
+description: The Security event log was cleared, a common anti-forensics step.
+references:
+  - https://attack.mitre.org/techniques/T1070/001/
+author: Sentiel
+tags:
+  - attack.defense-evasion
+  - attack.t1070.001
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 1102
+    Provider_Name: 'Microsoft-Windows-Eventlog'
+  condition: selection
+falsepositives:
+  - Rare administrative log maintenance
+level: high
