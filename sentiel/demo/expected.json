@@ -1,0 +1,53 @@
+{
+  "sentiel-bruteforce-windows": {
+    "attack": "RDP brute force",
+    "severity": "high",
+    "mitre": [
+      "T1110"
+    ]
+  },
+  "c1d3a684-f103-4ed2-bfa5-4ec0186d6b30": {
+    "attack": "Encoded PowerShell from Word (with prompt injection)",
+    "severity": "critical",
+    "mitre": [
+      "T1059",
+      "T1027"
+    ],
+    "injection": true
+  },
+  "cc7755e2-ad8e-437c-8d06-92113db8a447": {
+    "attack": "Run key persistence",
+    "severity": "high",
+    "mitre": [
+      "T1547"
+    ]
+  },
+  "79f18b61-eefc-4876-b069-6228e7942d8b": {
+    "attack": "Account added to Administrators",
+    "severity": "high",
+    "mitre": [
+      "T1098"
+    ]
+  },
+  "e317c199-887e-4526-b254-28c5ac4d2c8d": {
+    "attack": "Security log cleared",
+    "severity": "high",
+    "mitre": [
+      "T1070"
+    ]
+  },
+  "sentiel-bruteforce-ssh": {
+    "attack": "SSH brute force",
+    "severity": "high",
+    "mitre": [
+      "T1110"
+    ]
+  },
+  "7769c24f-0ec2-4a3b-a1f0-b3c77fb442eb": {
+    "attack": "Backdoor user via useradd",
+    "severity": "medium",
+    "mitre": [
+      "T1136"
+    ]
+  }
+}
