@@ -70,6 +70,7 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/
 
 # PyBuilder
 .pybuilder/
@@ -216,3 +217,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Sentiel
+sentiel.toml
+sentiel.db
+sentiel.db-*
+bench.md
