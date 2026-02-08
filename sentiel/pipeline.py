@@ -1,8 +1,11 @@
 import json
 import sqlite3
 from collections import Counter
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event
 
 import httpx
 
@@ -17,6 +20,8 @@ from .triage import LLMUnavailable, triage_alert
 
 DEMO_DIR = Path(__file__).parent / "demo"
 MAX_NOTIFY_PER_CYCLE = 20
+BACKOFF_BASE = 30  # seconds; doubles per consecutive LLM failure
+BACKOFF_MAX = 1800
 
 
 @dataclass
@@ -57,27 +62,97 @@ def ingest(conn: sqlite3.Connection, sources: Sources, summary: ScanSummary) -> 
             summary.warnings.append(f"No permission to read the {k[7:]} event log (run as administrator).")
 
 
+def _failure_count(conn: sqlite3.Connection) -> int:
+    return int(store.get_state(conn, "llm_failures", "0"))
+
+
+def _record_llm_failure(conn: sqlite3.Connection) -> datetime:
+    try:
+        failures = _failure_count(conn) + 1
+    except ValueError:  # corrupt counter (`sentiel triage` skips scan's check): restart the backoff
+        failures = 1
+    retry_at = datetime.now(UTC) + timedelta(seconds=min(BACKOFF_BASE * 2 ** (failures - 1), BACKOFF_MAX))
+    store.set_state(conn, "llm_failures", str(failures))
+    store.set_state(conn, "llm_retry_at", store.fmt_ts(retry_at))
+    return retry_at
+
+
+def _clear_llm_failures(conn: sqlite3.Connection) -> None:
+    store.set_state(conn, "llm_failures", "0")
+    store.set_state(conn, "llm_retry_at", "")
+
+
+def _backoff_until(conn: sqlite3.Connection) -> datetime | None:
+    """End of the LLM backoff, or None. Corrupt state must not stop detection, notify or the heartbeat."""
+    raw = store.get_state(conn, "llm_retry_at")
+    try:
+        _failure_count(conn)
+        retry_at = store.parse_ts(raw) if raw else None
+        if retry_at is not None and retry_at.utcoffset() is None:
+            raise TypeError("naive llm_retry_at")
+    except (ValueError, TypeError):
+        _clear_llm_failures(conn)  # treat as no backoff
+        return None
+    return retry_at
+
+
 def triage_pending(conn: sqlite3.Connection, cfg: Config, summary: ScanSummary, http: httpx.Client | None,
                     mock_response: str | list[str] | None) -> None:
     keys = cfg.keys
-    for row in store.pending_alerts(conn, cfg.max_triage_per_cycle):
+    jobs = []
+    for row in store.pending_alerts(conn, cfg.max_triage_per_cycle):  # DB + enrichment stay on the main thread
         alert, _ = store.row_to_alert(row)
         events = store.get_events(conn, alert.event_ids[:20])
         enrichment = None
         if cfg.enrich:
             enrichment = enrich_ips(conn, public_ips(events), keys, http) or None
+        jobs.append((alert, events, enrichment))
+    done, failed = 0, False
+    stop = Event()
+
+    def run(alert, events, enrichment):
+        if stop.is_set():
+            raise CancelledError  # batch aborted before this job started
         try:
-            res = triage_alert(alert, events, enrichment, cfg.model, mock_response, cfg.llm_timeout)
-        except LLMUnavailable as e:
-            summary.warnings.append(f"AI model unavailable ({e}); alerts stay pending, retry with `sentiel triage`.")
-            break
-        store.save_triage(conn, alert.id, res.triage, cfg.model, res.cost_usd, res.latency_ms)
-        summary.triaged += 1
+            return triage_alert(alert, events, enrichment, cfg.model, mock_response, cfg.llm_timeout)
+        except BaseException:
+            stop.set()  # a worker that dies must not pick up the next queued job before the main thread cancels
+            raise
+
+    with ThreadPoolExecutor(max_workers=cfg.triage_concurrency) as ex:
+        futures = [ex.submit(run, alert, events, enrichment)
+                   for alert, events, enrichment in jobs]
+        try:
+            for (alert, _, _), fut in zip(jobs, futures, strict=True):
+                try:
+                    res = fut.result()
+                except CancelledError:
+                    continue
+                except LLMUnavailable as e:
+                    if not failed:
+                        failed = True
+                        for f in futures:
+                            f.cancel()
+                        _record_llm_failure(conn)
+                        summary.warnings.append(
+                            f"AI model unavailable ({e}); alerts stay pending, retry with `sentiel triage`.")
+                    continue
+                if failed:
+                    continue  # after the first failure nothing more is saved; the rest stays pending
+                store.save_triage(conn, alert.id, res.triage, cfg.model, res.cost_usd, res.latency_ms)
+                summary.triaged += 1
+                done += 1
+        except BaseException:
+            stop.set()
+            ex.shutdown(wait=False, cancel_futures=True)  # Ctrl+C/other errors: don't run the queued batch
+            raise
+    if done and not failed:
+        _clear_llm_failures(conn)
     summary.pending = conn.execute("SELECT count(*) FROM alerts WHERE triage IS NULL").fetchone()[0]
 
 
 def _notify(conn: sqlite3.Connection, cfg: Config, summary: ScanSummary, http: httpx.Client | None) -> None:
-    sent = 0
+    sent, failed_channels = 0, set()
     for row in store.unnotified_alerts(conn):
         alert, triage = store.row_to_alert(row)
         severity = effective_severity(alert.sigma_level, triage)
@@ -90,11 +165,16 @@ def _notify(conn: sqlite3.Connection, cfg: Config, summary: ScanSummary, http: h
         host = events[0]["host"] if events else "unknown"
         text = format_message(alert, triage, severity, host, is_contested(alert.sigma_level, triage))
         delivered = send(cfg.notify, text, http)
-        if delivered is None:
+        if not delivered:
             return  # no channel configured: leave flags alone so alerts fire once a channel is set up
-        if delivered:
-            store.mark_notified(conn, alert.id)
-            summary.notified += 1
+        if not any(delivered.values()):
+            return  # every channel is failing: one attempt per cycle, retry next scan
+        for name, ok in delivered.items():
+            if not ok and name not in failed_channels:  # names only: token/webhook URL never reach the warning
+                failed_channels.add(name)
+                summary.warnings.append(f"notification channel {name} failed")
+        store.mark_notified(conn, alert.id)  # at least one channel has it; resending would starve the working one
+        summary.notified += 1
         sent += 1
 
 
@@ -110,11 +190,18 @@ def scan(conn: sqlite3.Connection, cfg: Config, *, ai: bool = True, http: httpx.
     last_id = conn.execute("SELECT coalesce(max(id), 0) FROM logs").fetchone()[0]
     store.set_state(conn, "last_detected_log_id", str(last_id))
 
+    retry_at = None
     if ai:
+        retry_at = _backoff_until(conn)
+    if ai and not (retry_at and datetime.now(UTC) < retry_at):
         triage_pending(conn, cfg, summary, http, mock_response)
     else:
+        if ai:
+            summary.warnings.append(f"AI paused after failures; next attempt at {retry_at:%H:%M:%S} UTC. "
+                                    "Run `sentiel triage` to retry now.")
         summary.pending = conn.execute("SELECT count(*) FROM alerts WHERE triage IS NULL").fetchone()[0]
     _notify(conn, cfg, summary, http)
+    store.set_state(conn, "heartbeat", store.fmt_ts(datetime.now(UTC)))
     return summary
 
 
