@@ -5,7 +5,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import Counter
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -66,15 +66,27 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
 ]
 
 
-def parse_auth_line(line: str, year: int | None = None) -> Event | None:
+def parse_auth_line(line: str, now: datetime | None = None) -> Event | None:
     m = _SYSLOG.match(line.rstrip("\r\n"))
     if not m:
         return None
     if m["iso"]:
-        ts = datetime.fromisoformat(m["iso"])
+        try:
+            ts = datetime.fromisoformat(m["iso"])
+        except ValueError:  # regex-shaped but not a real date, e.g. month 13
+            return None
     else:
-        # ponytail: BSD syslog has no year or zone; assume current year, local time (wrong for Dec logs read in Jan)
-        ts = datetime.strptime(f"{year or datetime.now().year} {m['bsd']}", "%Y %b %d %H:%M:%S").astimezone()
+        now = now or datetime.now()
+        for y in (now.year, now.year - 1):
+            try:
+                ts = datetime.strptime(f"{y} {m['bsd']}", "%Y %b %d %H:%M:%S")
+            except ValueError:  # Feb 29 in a non-leap year
+                continue
+            if ts <= now + timedelta(days=1):  # 1 day of slack for clock skew
+                break
+        else:
+            return None
+        ts = ts.astimezone()  # BSD syslog has no zone: assume local time
     fields: dict[str, str | int | None] = {
         "program": m["program"], "pid": int(m["pid"]) if m["pid"] else None, "message": m["message"],
         "event": "other",
