@@ -8,6 +8,7 @@ model = "ollama/llama3.1:8b"
 interval = 30                  # seconds between cycles in `sentiel watch`
 llm_timeout = 120              # seconds per model call; local models on CPU can be slow
 max_triage_per_cycle = 50      # cost guard: the rest stays pending
+triage_concurrency = 1         # parallel LLM calls; raise for cloud models, keep 1 for local Ollama
 notify_min_severity = "high"   # info | low | medium | high | critical
 db_path = "sentiel.db"
 enrich = false                 # true: look up public IPs (ip-api.com, plus AbuseIPDB/VirusTotal if keys are set)
