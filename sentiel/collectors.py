@@ -219,7 +219,9 @@ def read_windows(state: dict, stats: Counter | None = None, channels=WINDOWS_CHA
         except pywintypes.error as e:
             if e.winerror == 5:
                 stats[f"denied:{channel}"] += 1
-            continue  # channel missing (e.g. no Sysmon) or no permission
+            elif e.winerror == 15007:  # ERROR_EVT_CHANNEL_NOT_FOUND (e.g. no Sysmon)
+                stats[f"missing:{channel}"] += 1
+            continue
         while batch := win32evtlog.EvtNext(handle, 256):
             for evt in batch:
                 try:
