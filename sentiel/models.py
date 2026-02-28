@@ -19,7 +19,10 @@ class Event(BaseModel):
     @field_validator("ts")
     @classmethod
     def _utc(cls, v: datetime) -> datetime:
-        return v.replace(tzinfo=UTC) if v.tzinfo is None else v.astimezone(UTC)
+        try:
+            return v.replace(tzinfo=UTC) if v.tzinfo is None else v.astimezone(UTC)
+        except (OverflowError, OSError) as e:  # e.g. year 1 / 9999 once shifted to UTC
+            raise ValueError("timestamp out of range") from e
 
 
 class Alert(BaseModel):
@@ -30,6 +33,13 @@ class Alert(BaseModel):
     mitre: list[str]
     ts: datetime
     event_ids: list[int]
+    status: str = "open"
+    note: str | None = None
+    count: int = 1
+    last_ts: datetime | None = None
+    host: str | None = None
+    group_key: str | None = None
+    fresh: int | None = None  # correlations: events of the burst newer than the detection cursor
 
 
 class Triage(BaseModel):
