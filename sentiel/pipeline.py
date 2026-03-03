@@ -10,12 +10,12 @@ from threading import Event
 import httpx
 
 from . import store
-from .collectors import read_json, read_linux_auth, read_windows
+from .collectors import read_json, read_linux_auth, read_regex, read_windows
 from .config import Config, Sources
-from .detect import detect, load_rules
+from .detect import detect, rules_for
 from .enrich import enrich_ips, public_ips
-from .models import RANK, effective_severity, is_contested
-from .notify import format_message, send
+from .models import RANK, Alert, effective_severity, is_contested
+from .notify import format_digest, format_message, send
 from .triage import LLMUnavailable, triage_alert
 
 DEMO_DIR = Path(__file__).parent / "demo"
@@ -48,6 +48,8 @@ def ingest(conn: sqlite3.Connection, sources: Sources, summary: ScanSummary) -> 
         jobs.append((f"linux:{sources.linux_auth}", lambda st, p=sources.linux_auth: read_linux_auth(p, st, stats)))
     for path in sources.json_files:
         jobs.append((f"json:{path}", lambda st, p=path: read_json(p, stats)))
+    for src in sources.files:
+        jobs.append((f"file:{src.path}", lambda st, s=src: read_regex(s, st, stats)))
     for key, make in jobs:
         state = _load_state(conn, f"src:{key}")
         try:
@@ -148,7 +150,7 @@ def triage_pending(conn: sqlite3.Connection, cfg: Config, summary: ScanSummary, 
             raise
     if done and not failed:
         _clear_llm_failures(conn)
-    summary.pending = conn.execute("SELECT count(*) FROM alerts WHERE triage IS NULL").fetchone()[0]
+    summary.pending = store.count_pending(conn)
 
 
 def _notify(conn: sqlite3.Connection, cfg: Config, summary: ScanSummary, http: httpx.Client | None) -> None:
@@ -178,28 +180,83 @@ def _notify(conn: sqlite3.Connection, cfg: Config, summary: ScanSummary, http: h
         sent += 1
 
 
+def send_digest(conn: sqlite3.Connection, cfg: Config, http: httpx.Client | None = None,
+                now: datetime | None = None) -> dict[str, bool]:
+    """Send the last-24h summary; `{}` means no channel is configured. Never touches `digest_last`."""
+    now = now or datetime.now().astimezone()
+    stats = store.digest_stats(conn, (now - timedelta(hours=24)).astimezone(UTC))
+    return send(cfg.notify, format_digest(stats), http)
+
+
+def maybe_send_digest(conn: sqlite3.Connection, cfg: Config, http: httpx.Client | None = None,
+                      now: datetime | None = None) -> bool:
+    """Once per local day, from `digest_hour` on. Only a delivered digest is marked, so failures retry next cycle."""
+    now = now or datetime.now().astimezone()
+    today = now.date().isoformat()
+    if cfg.digest_hour is None or now.hour < cfg.digest_hour or store.get_state(conn, "digest_last") == today:
+        return False
+    if not any(send_digest(conn, cfg, http, now).values()):
+        return False
+    store.set_state(conn, "digest_last", today)
+    return True
+
+
+def apply_suppressions(conn: sqlite3.Connection, cfg: Config, alerts: list[Alert]) -> None:
+    """Mark alerts matched by a `[[suppress]]` entry. Runs inside scan's transaction; commits nothing.
+
+    ponytail: only the first event of the alert is checked (a grouped burst is judged by its trigger).
+    """
+    by_rule: dict[str, list] = {}
+    for s in cfg.suppress:
+        by_rule.setdefault(s.rule_id, []).append(s)
+    for a in alerts:
+        if a.rule_id not in by_rule:
+            continue
+        events = store.get_events(conn, a.event_ids[:1])
+        fields = events[0].get("fields", {}) if events else {}
+        for s in by_rule[a.rule_id]:
+            value = fields.get(s.field)
+            if value is not None and str(value) == str(s.equals):
+                a.status, a.note = "suppressed", s.reason
+                break
+
+
 def scan(conn: sqlite3.Connection, cfg: Config, *, ai: bool = True, http: httpx.Client | None = None,
          mock_response: str | list[str] | None = None) -> ScanSummary:
     summary = ScanSummary()
     ingest(conn, cfg.sources, summary)
 
-    rules, warnings = load_rules()
-    summary.warnings += [f"rule skipped: {w}" for w in warnings]
-    since = int(store.get_state(conn, "last_detected_log_id", "0"))
-    summary.new_alerts = store.insert_alerts(conn, detect(conn, rules, since))
-    last_id = conn.execute("SELECT coalesce(max(id), 0) FROM logs").fetchone()[0]
-    store.set_state(conn, "last_detected_log_id", str(last_id))
+    rules, warnings = rules_for(cfg)
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")  # cursor read under the write lock: a concurrent scan waits, then sees it moved
+    try:  # alerts and the detection cursor commit together: a crash never replays (and double counts) a burst
+        since = int(store.get_state(conn, "last_detected_log_id", "0"))
+        new_alerts = detect(conn, rules, since, warnings)
+        apply_suppressions(conn, cfg, new_alerts)
+        last_id = conn.execute("SELECT coalesce(max(id), 0) FROM logs").fetchone()[0]
+        summary.new_alerts = store.insert_alerts(conn, new_alerts, timedelta(seconds=cfg.group_window), commit=False)
+        store.set_state(conn, "last_detected_log_id", str(last_id), commit=False)
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    if warnings:
+        summary.warnings.append(f"{len(warnings)} rule warnings (see `sentiel rules list --skipped`)")
 
     retry_at = None
     if ai:
         retry_at = _backoff_until(conn)
     if ai and not (retry_at and datetime.now(UTC) < retry_at):
-        triage_pending(conn, cfg, summary, http, mock_response)
+        try:  # outside the detection transaction; a triage bug must not skip notify and heartbeat
+            triage_pending(conn, cfg, summary, http, mock_response)
+        except Exception as e:
+            summary.warnings.append(f"triage failed: {e}")
+            summary.pending = store.count_pending(conn)
     else:
         if ai:
             summary.warnings.append(f"AI paused after failures; next attempt at {retry_at:%H:%M:%S} UTC. "
                                     "Run `sentiel triage` to retry now.")
-        summary.pending = conn.execute("SELECT count(*) FROM alerts WHERE triage IS NULL").fetchone()[0]
+        summary.pending = store.count_pending(conn)
     _notify(conn, cfg, summary, http)
     store.set_state(conn, "heartbeat", store.fmt_ts(datetime.now(UTC)))
     return summary
@@ -207,4 +264,5 @@ def scan(conn: sqlite3.Connection, cfg: Config, *, ai: bool = True, http: httpx.
 
 def demo_config(cfg: Config) -> Config:
     sources = Sources(windows=False, linux_auth=str(DEMO_DIR / "auth_log.txt"), json=[str(DEMO_DIR / "events.jsonl")])
-    return cfg.model_copy(update={"sources": sources, "enrich": False, "notify": {}})
+    return cfg.model_copy(update={"sources": sources, "enrich": False, "notify": {},
+                                     "group_window": 0, "suppress": [], "digest_hour": None})
