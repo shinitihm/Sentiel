@@ -29,6 +29,7 @@ def _by_name(checks):
 def test_healthy_setup_has_no_critical_failure(tmp_path):
     checks = _by_name(run_checks(_cfg(tmp_path), ai=False))
     assert checks["database"].ok and checks["rules"].ok
+    assert checks["rules"].detail.endswith(" loaded, 0 warnings")  # one warning may stand for many skipped rules
     assert "model" not in checks
     assert not checks["notify"].ok and not checks["notify"].critical
     assert not checks["heartbeat"].ok  # never ran
@@ -125,3 +126,26 @@ def test_doctor_cli_reports_invalid_config_without_traceback(tmp_path):
 def test_doctor_cli_reports_unreadable_config_without_traceback(tmp_path):
     r = runner.invoke(app, ["doctor", "--no-ai", "-c", str(tmp_path)])  # a directory: reading it raises OSError
     assert r.exit_code == 1 and "config" in r.output and isinstance(r.exception, SystemExit)
+
+
+def test_doctor_config_error_does_not_echo_input(tmp_path):
+    f = tmp_path / "sentiel.toml"
+    f.write_text("[keys]\nabuseipdb = 999\n", encoding="utf-8")
+    r = runner.invoke(app, ["doctor", "--no-ai", "-c", str(f)])
+    assert r.exit_code == 1 and "config" in r.output and "999" not in r.output
+
+
+def test_doctor_missing_sysmon_channel_is_warn(tmp_path, monkeypatch):
+    import sys
+
+    from sentiel import doctor
+
+    def fake(state, stats, channels=()):
+        stats[f"missing:{channels[0]}"] += 1
+        return iter(())
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(doctor, "read_windows", fake)
+    checks = doctor._check_sources(Config(sources=Sources(windows=True)))
+    missing = [c for c in checks if c.detail == "channel not installed"]
+    assert missing and all(not c.ok and not c.critical for c in missing)
