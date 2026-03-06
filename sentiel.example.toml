@@ -10,13 +10,29 @@ llm_timeout = 120              # seconds per model call; local models on CPU can
 max_triage_per_cycle = 50      # cost guard: the rest stays pending
 triage_concurrency = 1         # parallel LLM calls; raise for cloud models, keep 1 for local Ollama
 notify_min_severity = "high"   # info | low | medium | high | critical
+# digest_hour = 9              # local hour (0-23) of the daily summary in `watch`; unset = off (`sentiel digest` sends now)
+# group_window = 3600         # seconds: repeats of the same rule/host/group within it grow one alert (count); 0 = off
 db_path = "sentiel.db"
 enrich = false                 # true: look up public IPs (ip-api.com, plus AbuseIPDB/VirusTotal if keys are set)
+rules_dirs = []                # extra Sigma rule folders, e.g. ["~/.sentiel/rules"] or a SigmaHQ clone
+disabled_rules = []            # rule ids to turn off (see `sentiel rules list`)
+
+# Silence a known-benign pattern: alerts of the rule whose FIRST event has field == equals are stored as
+# "suppressed" (never triaged or notified). `sentiel set <id> false_positive --suppress FIELD` prints this block.
+# [[suppress]]
+# rule_id = "sentiel-bruteforce-ssh"
+# field = "IpAddress"
+# equals = "10.0.0.5"
+# reason = "monitoring probe"
 
 [sources]
 windows = true                 # needs administrator rights for the Security log
 # linux_auth = "/var/log/auth.log"
 # json = ["C:/logs/app.jsonl"] # JSON Lines, one event per line
+# [[sources.files]]            # any text log, parsed with a regex; named groups become Sigma fields
+# path = "/var/log/nginx/access.log"
+# regex = '^(?P<IpAddress>\S+) \S+ \S+ \[[^\]]+\] "(?P<Method>\w+) (?P<Url>\S+)'
+# product = "linux"            # windows | linux | json: which Sigma rules apply
 
 [keys]                         # or env vars ABUSEIPDB_API_KEY / VT_API_KEY
 abuseipdb = ""
