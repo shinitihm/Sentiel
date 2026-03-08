@@ -4,10 +4,26 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sentiel"
-version = "0.4.0"
+dynamic = ["version"]
 description = "Personal AI-powered SOC: Sigma detection + LLM triage with any model"
 readme = "README.md"
 license = "MIT"
+authors = [{name = "shinitihm"}]
+keywords = ["soc", "sigma", "security", "llm", "triage", "siem", "detection"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+]
 requires-python = ">=3.11"
 dependencies = [
     "litellm>=1.50",
@@ -24,8 +40,36 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 
+[project.urls]
+Homepage = "https://github.com/shinitihm/Sentiel"
+Issues = "https://github.com/shinitihm/Sentiel/issues"
+Changelog = "https://github.com/shinitihm/Sentiel/blob/main/CHANGELOG.md"
+
 [project.scripts]
 sentiel = "sentiel.cli:app"
+
+[tool.hatch.version]
+path = "sentiel/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/sentiel",
+    "/tests",
+    "/contrib",
+    "/scripts",
+    "/README.md",
+    "/README.pt-BR.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+    "/CONTRIBUTING.md",
+    "/SECURITY.md",
+    "/sentiel.example.toml",
+    "/pyproject.toml",
+]
+exclude = ["*.db", "*.db-*", "*.sqlite*", ".env*", "sentiel.toml", "__pycache__"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["sentiel"]
 
 [tool.pytest.ini_options]
 markers = ["llm: needs a real LLM (Ollama or API key)"]

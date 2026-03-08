@@ -11,8 +11,8 @@ from email.parser import BytesHeaderParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-FORBIDDEN_DIRS = {".superpowers", "docs", ".venv", ".claude", "__pycache__"}
-FORBIDDEN_FILES = ("sentiel.toml", "*.db", "*.sqlite*", ".env*", "*.pyc")
+FORBIDDEN_DIRS = {".superpowers", "docs", ".venv", ".claude", ".git", ".pytest_cache", ".ruff_cache", "__pycache__"}
+FORBIDDEN_FILES = ("sentiel.toml*", "*.db*", "*.sqlite*", ".env*", "*.pyc")
 WHEEL_REQUIRED = ("sentiel/demo/events.jsonl", "sentiel/demo/auth_log.txt", "sentiel/demo/expected.json")
 MIN_RULES = 8
 
@@ -27,13 +27,14 @@ def check_members(names: list[str], kind: str) -> list[str]:
     """Returns the problems found in the member names of one archive ('sdist' or 'wheel')."""
     problems = []
     for name in names:
-        parts = [p for p in name.replace("\\", "/").split("/") if p]
+        norm = name.replace("\\", "/").lower()
+        parts = [p for p in norm.split("/") if p]
         if not parts:
             continue
-        if any(p in FORBIDDEN_DIRS for p in parts[:-1]) or parts[-1] in FORBIDDEN_DIRS:
+        if norm.startswith("/") or ".." in parts or re.match(r"[a-z]:", norm):
+            problems.append(f"{kind}: unsafe path {name}")
+        elif any(p in FORBIDDEN_DIRS or any(fnmatch.fnmatchcase(p, pat) for pat in FORBIDDEN_FILES) for p in parts):
             problems.append(f"{kind}: forbidden path {name}")
-        elif any(fnmatch.fnmatchcase(parts[-1], pat) for pat in FORBIDDEN_FILES):
-            problems.append(f"{kind}: forbidden file {name}")
     if kind == "wheel":
         rules = [n for n in names if fnmatch.fnmatchcase(n, "sentiel/rules/*.yml")]
         if len(rules) < MIN_RULES:
@@ -55,19 +56,29 @@ def check_dir(dist_dir: Path) -> list[str]:
     if not archives:
         return [f"no *.tar.gz or *.whl in {dist_dir}"]
     for path in archives:
-        if path.name.endswith(".whl"):
-            with zipfile.ZipFile(path) as zf:
-                names = zf.namelist()
-                meta = [n for n in names if n.endswith(".dist-info/METADATA")]
-                found = _version_of(zf.read(meta[0])) if meta else ""
-            problems += check_members(names, "wheel")
-        else:
-            with tarfile.open(path) as tf:
-                names = tf.getnames()
-                info = [m for m in tf.getmembers() if m.isfile() and re.fullmatch(r"[^/]+/PKG-INFO", m.name)]
-                found = _version_of(tf.extractfile(info[0]).read()) if info else ""
-            problems += check_members(names, "sdist")
-        if found != expected:
+        try:
+            if path.name.endswith(".whl"):
+                with zipfile.ZipFile(path) as zf:
+                    names = zf.namelist()
+                    meta = [n for n in names if re.fullmatch(r"[^/]+\.dist-info/METADATA", n)]
+                    found = _version_of(zf.read(meta[0])) if len(meta) == 1 else None
+                problems += check_members(names, "wheel")
+                if found is None:
+                    problems.append(f"{path.name}: expected exactly one <name>.dist-info/METADATA, found {len(meta)}")
+            else:
+                with tarfile.open(path) as tf:
+                    members = tf.getmembers()
+                    names = [m.name for m in members]
+                    info = [m for m in members if m.isfile() and re.fullmatch(r"[^/]+/PKG-INFO", m.name)]
+                    found = _version_of(tf.extractfile(info[0]).read()) if len(info) == 1 else None
+                problems += check_members(names, "sdist")
+                problems += [f"sdist: non-regular member {m.name}" for m in members if not (m.isfile() or m.isdir())]
+                if found is None:
+                    problems.append(f"{path.name}: expected exactly one <root>/PKG-INFO, found {len(info)}")
+        except (zipfile.BadZipFile, tarfile.TarError, OSError, KeyError, EOFError):
+            problems.append(f"{path.name}: unreadable archive")
+            continue
+        if found is not None and found != expected:
             problems.append(f"{path.name}: metadata version {found or '?'} differs from sentiel.__version__ {expected}")
     return problems
 
