@@ -120,7 +120,7 @@ def _new_lines(path: str | Path, state: dict, stats: Counter) -> Iterator[str]:
         stats["skipped"] += 1
         state["offset"] = offset + MAX_READ
         return
-    # split on \n only: str.splitlines() also breaks on \x0b, \x1c,  ... which would let a log line forge another
+    # split on \n only: str.splitlines() also breaks on \x0b, \x1c and others, which would let a log line forge another
     for raw in data[:end].split(b"\n"):
         line = raw.rstrip(b"\r").decode("utf-8", errors="replace")
         if line.strip():
