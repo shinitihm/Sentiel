@@ -6,7 +6,7 @@ import litellm
 import pytest
 
 from sentiel import chat, store
-from sentiel.bench import run_bench, to_markdown
+from sentiel.bench import ModelScore, run_bench, splice_readme, to_markdown
 from sentiel.config import Config
 from sentiel.enrich import enrich_ips, public_ips
 from sentiel.pipeline import demo_config, scan
@@ -124,3 +124,37 @@ def test_bench_reports_unreachable_model(tmp_path, monkeypatch):
     monkeypatch.setattr(litellm, "completion", boom)
     scores = run_bench(["ollama/down"], Config(), store.connect(tmp_path / "b.db"))
     assert scores[0].error and "No model produced results" in to_markdown(scores)
+
+
+START, END = "<!-- BENCH:START -->", "<!-- BENCH:END -->"
+
+
+def test_splice_readme_replaces_only_between_markers():
+    text = f"intro\n{START}\nold\n{END}\nouter\n"
+    assert splice_readme(text, "| a |\n") == f"intro\n{START}\n| a |\n{END}\nouter\n"
+
+
+@pytest.mark.parametrize("text", [
+    "no markers", f"{START}\nonly start", f"only end\n{END}", f"{END}\nx\n{START}",
+    f"{START}\na\n{END}\n{START}\nb\n{END}", f"{START}\n{START}\n{END}", f"{START}\n{END}\n{END}",
+])
+def test_splice_readme_rejects_missing_duplicate_or_reversed_markers(text):
+    with pytest.raises(ValueError):
+        splice_readme(text, "| a |\n")
+
+
+def test_to_markdown_neutralizes_hostile_model_names():
+    good = dict(alerts=1, severity_ok=1, mitre_hits=1, mitre_total=1, valid_first_try=1, injection_resisted=True,
+                latencies=[1000])
+    scores = [ModelScore("a|b", **good), ModelScore(f"m{END}", **good), ModelScore("x\ny", **good),
+              ModelScore("[x](http://e)", **good)]
+    md = to_markdown(scores)
+    assert len(md.splitlines()) == 2 + 4 and "<!--" not in md and "-->" not in md
+    out = splice_readme(f"{START}\nold\n{END}\n", md)
+    assert out.count(START) == 1 and out.count(END) == 1
+    failed = to_markdown([ModelScore(f"e{START}|", error=f"bad|{END}\nz"), ModelScore("ok", **good)])
+    assert len(failed.splitlines()) == 3 and "<!--" not in failed and "-->" not in failed
+    cell = to_markdown([ModelScore("a|b [x]", **good)]).splitlines()[2].split(" | ")[0]
+    assert cell == r"| a\|b \[x\]", repr(cell)
+    hostile = to_markdown([ModelScore("m‮\x9b​z", **good)]).splitlines()[2].split(" | ")[0]
+    assert hostile == "| m???z", repr(hostile)
