@@ -1,13 +1,16 @@
 import json
 import re
+import tomllib
+from pathlib import Path
 
 import litellm
 import pytest
 from typer.testing import CliRunner
 
 from sentiel import __version__, store
+from sentiel.bench import ModelScore
 from sentiel.cli import app
-from sentiel.config import Config, load_config
+from sentiel.config import Config, describe_error, load_config
 from sentiel.detect import RULES_DIR
 from sentiel.pipeline import DEMO_DIR
 
@@ -344,7 +347,7 @@ def test_toml_str_escapes_control_and_format_characters(tmp_path):
     import tomllib
 
     cfg_file, conn = _populated(tmp_path)
-    nasty = "a‮b\x9bc d​e"
+    nasty = "a\u202eb\x9bc\u2028d\u200be"
     _set_field(conn, tmp_path, "Nasty", nasty)
     out = runner.invoke(app, ["set", "1", "false_positive", "--suppress", "Nasty", "--note", nasty,
                               "-c", str(cfg_file)])
@@ -352,7 +355,7 @@ def test_toml_str_escapes_control_and_format_characters(tmp_path):
     text = out.output[out.output.index("[[suppress]]"):]
     (block,) = tomllib.loads(text)["suppress"]
     assert block["equals"] == nasty and block["reason"] == nasty
-    assert not any(c in out.output for c in "‮\x9b ​")
+    assert not any(c in out.output for c in "\u202e\x9b\u2028\u200b")
 
 
 def test_show_and_alerts_survive_markup_in_mitre(tmp_path):
@@ -433,3 +436,365 @@ def test_suppress_config_is_strict():
                 {"extra_key": 1}):
         with pytest.raises(ValidationError):
             Suppress(**{**base, **bad})
+
+
+def test_unknown_top_level_key_is_a_config_error(tmp_path):
+    f = tmp_path / "sentiel.toml"
+    f.write_text("intervall = 30\n", encoding="utf-8")
+    with pytest.raises(ValueError) as exc:
+        load_config(f)
+    msg = describe_error(exc.value)
+    assert "intervall" in msg and "Extra inputs are not permitted" in msg
+    r = runner.invoke(app, ["scan", "--no-ai", "-c", str(f)])
+    assert r.exit_code == 2 and "Invalid config" in plain(r.output) and "intervall" in plain(r.output)
+
+
+@pytest.mark.parametrize("toml, name, secret", [
+    ("[sources]\nwindos = true\n", "windos", None),
+    ('[[sources.files]]\npath = "a.log"\nregx = "SECRET"\n', "regx", "SECRET"),
+    ('[notify]\ntelegram_bot_tokn = "123:SECRET"\n', "telegram_bot_tokn", "SECRET"),
+    ('[keys]\nabuseipdb_key = "SECRET"\n', "abuseipdb_key", "SECRET"),
+])
+def test_unknown_nested_key_names_the_key_never_the_value(tmp_path, toml, name, secret):
+    f = tmp_path / "sentiel.toml"
+    f.write_text(toml, encoding="utf-8")
+    r = runner.invoke(app, ["scan", "--no-ai", "-c", str(f)])
+    out = plain(r.output)
+    assert r.exit_code == 2 and "Invalid config" in out and name in out
+    if secret:
+        assert secret not in out and "123:" not in out
+
+
+def test_unknown_keys_message_lists_valid_names(tmp_path):
+    f = tmp_path / "sentiel.toml"
+    f.write_text('[keys]\nabuseipdb_key = "SECRET"\n', encoding="utf-8")
+    with pytest.raises(ValueError) as exc:
+        load_config(f)
+    assert "unknown key 'abuseipdb_key' in [keys] (valid: abuseipdb, virustotal)" in describe_error(exc.value)
+    assert "SECRET" not in describe_error(exc.value)
+
+
+def test_shipped_examples_still_load():
+    text = (Path(__file__).resolve().parent.parent / "sentiel.example.toml").read_text(encoding="utf-8")
+    cfg_line = re.compile(r"^(\[\[?[\w.]+\]\]?|[A-Za-z_]+ *= *.+)$")
+    lines = []
+    for ln in text.splitlines():
+        m = re.match(r"^# ?(.*)$", ln)
+        body = m.group(1) if m else ln
+        if m and not cfg_line.match(re.sub(r"\s+#.*$", "", body).rstrip()):
+            continue  # prose
+        lines.append(body if m else ln)
+    uncommented = "\n".join(lines)
+    for src in (text, uncommented):
+        data = tomllib.loads(src)
+        cfg = Config.model_validate(data)
+        assert cfg.interval == 30
+    full = Config.model_validate(tomllib.loads(uncommented))
+    assert full.digest_hour == 9 and full.group_window == 3600 and full.triage_concurrency == 1
+    assert full.sources.json_files == ["C:/logs/app.jsonl"] and len(full.sources.files) == 1
+    assert len(full.suppress) == 1 and full.rules_dirs == [] and full.disabled_rules == []
+
+
+def test_bench_readme_flag_writes_atomically_and_keeps_file_on_error(tmp_path, monkeypatch):
+    row = ModelScore("ollama/x", alerts=7, severity_ok=7, mitre_hits=7, mitre_total=7, valid_first_try=7,
+                     injection_resisted=True, latencies=[1000])
+    monkeypatch.setattr("sentiel.bench.run_bench", lambda *a, **k: [row])
+    readme = tmp_path / "README.md"
+    readme.write_bytes("# T\r\n<!-- BENCH:START -->\r\nold\r\n<!-- BENCH:END -->\r\ntail ç\r\n".encode())
+    base = ["bench", "ollama/x", "--out", str(tmp_path / "b.md"), "-c", str(tmp_path / "missing.toml"), "--readme"]
+    r = runner.invoke(app, base + ["--readme-file", str(readme)])
+    assert r.exit_code == 0, r.output
+    data = readme.read_bytes()
+    assert b"\n" not in data.replace(b"\r\n", b"") and b"| ollama/x |" in data and b"old" not in data
+    assert data.startswith(b"# T\r\n<!-- BENCH:START -->\r\n") and data.endswith(b"tail \xc3\xa7\r\n")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["README.md", "b.md"]
+    bad = tmp_path / "bad.md"
+    bad.write_bytes(b"no markers\r\n")
+    r = runner.invoke(app, base + ["--readme-file", str(bad)])
+    assert r.exit_code == 1 and "Traceback" not in r.output and bad.read_bytes() == b"no markers\r\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["README.md", "b.md", "bad.md"]
+    r = runner.invoke(app, base + ["--readme-file", str(tmp_path / "nope.md")])
+    assert r.exit_code == 1 and "Traceback" not in r.output
+
+
+def _fake_bench(monkeypatch):
+    calls = []
+    row = ModelScore("ollama/x", alerts=7, severity_ok=7, mitre_hits=7, mitre_total=7, valid_first_try=7,
+                     injection_resisted=True, latencies=[1000])
+
+    def fake(*a, **k):
+        calls.append(1)
+        return [row]
+
+    monkeypatch.setattr("sentiel.bench.run_bench", fake)
+    return calls
+
+
+def test_bench_readme_is_validated_before_running_the_models(tmp_path, monkeypatch):
+    calls = _fake_bench(monkeypatch)
+    bad = tmp_path / "bad.md"
+    bad.write_bytes(b"no markers\r\n")
+    out = tmp_path / "b.md"
+    base = ["bench", "ollama/x", "--out", str(out), "-c", str(tmp_path / "missing.toml"), "--readme"]
+    for target in (bad, tmp_path / "nope.md"):
+        r = runner.invoke(app, base + ["--readme-file", str(target)])
+        assert r.exit_code == 1 and "Traceback" not in r.output, r.output
+    assert calls == [] and not out.exists() and bad.read_bytes() == b"no markers\r\n"
+
+
+def test_bench_refuses_out_equal_to_readme_file(tmp_path, monkeypatch):
+    calls = _fake_bench(monkeypatch)
+    readme = tmp_path / "README.md"
+    original = b"# T\n<!-- BENCH:START -->\nold\n<!-- BENCH:END -->\n"
+    readme.write_bytes(original)
+    r = runner.invoke(app, ["bench", "ollama/x", "--out", str(readme), "-c", str(tmp_path / "missing.toml"),
+                            "--readme", "--readme-file", str(tmp_path / "." / "README.md")])
+    assert r.exit_code == 1 and "Traceback" not in r.output
+    assert calls == [] and readme.read_bytes() == original
+
+
+def test_bench_readonly_readme_leaves_no_temp_file(tmp_path, monkeypatch):
+    import os
+    import stat
+
+    _fake_bench(monkeypatch)
+    readme = tmp_path / "README.md"
+    original = b"# T\n<!-- BENCH:START -->\nold\n<!-- BENCH:END -->\n"
+    readme.write_bytes(original)
+    os.chmod(readme, stat.S_IREAD)
+    try:
+        r = runner.invoke(app, ["bench", "ollama/x", "--out", str(tmp_path / "b.md"), "-c",
+                                str(tmp_path / "missing.toml"), "--readme", "--readme-file", str(readme)])
+        if os.name == "nt":  # POSIX can replace a read-only file inside a writable folder
+            assert r.exit_code == 1 and "Traceback" not in r.output, r.output
+            assert readme.read_bytes() == original
+        assert not list(tmp_path.glob(".sentiel-*.tmp"))
+    finally:
+        os.chmod(readme, stat.S_IWRITE | stat.S_IREAD)
+
+
+def test_rules_test_reports_skipped_lines(tmp_path):
+    events = tmp_path / "ev.jsonl"
+    events.write_text("garbage\nmore garbage\n[1]\n", encoding="utf-8")
+    rule = next(RULES_DIR.glob("*security_log_cleared*.yml"))
+    r = runner.invoke(app, ["rules", "test", str(rule), str(events)])
+    assert r.exit_code == 1 and "Traceback" not in r.output
+    assert "3 lines skipped" in plain(r.output)
+
+
+def test_set_help_shows_literal_suppress_block():
+    r = runner.invoke(app, ["set", "--help"])
+    assert r.exit_code == 0 and "[[suppress]]" in plain(r.output)
+
+
+def test_safe_strips_terminal_controls():
+    from sentiel.cli import safe
+
+    nasty = "a\x1b[31mb\x1b]8;;http://x\x07c\x9bd\u202ee [red]x[/red]\u2028\u2029f g\nh"
+    out = safe(nasty)
+    assert not any(c in out for c in "\x1b\x07\x9b\u202e\u2028\u2029\n")
+    assert out == "a?[31mb?]8;;http://x?c?d?e \\[red]x\\[/red]??f g?h"
+    assert safe("plain text, 100% ok") == "plain text, 100% ok"
+    assert safe("l1\nl2", keep_newlines=True) == "l1\nl2"
+
+
+HOSTILE = "Evil \x1b[31mred\x1b]8;;http://x\x07 \u202erev \x9b [red]x[/red]"
+HOSTILE_ID = "99999999-9999-4999-8999-999999999999"
+
+
+def _hostile_rule_dir(tmp_path):
+    src = next(RULES_DIR.glob("*security_log_cleared*.yml")).read_text(encoding="utf-8")
+    src = re.sub(r"^title:.*$", lambda _: "title: " + json.dumps(HOSTILE), src, count=1, flags=re.M)
+    src = re.sub(r"^id:.*$", "id: " + HOSTILE_ID, src, count=1, flags=re.M)
+    d = tmp_path / "myrules"
+    d.mkdir()
+    (d / "evil.yml").write_text(src, encoding="utf-8")
+    return d
+
+
+def test_alerts_show_report_rules_list_hide_control_chars_in_third_party_titles(tmp_path):
+    from sentiel.pipeline import demo_config, scan
+
+    d = _hostile_rule_dir(tmp_path)
+    db = tmp_path / "s.db"
+    cfg_file = tmp_path / "sentiel.toml"
+    cfg_file.write_text(f'db_path = "{db.as_posix()}"\nmodel = "ollama/x"\nrules_dirs = ["{d.as_posix()}"]\n',
+                        encoding="utf-8")
+    conn = store.connect(db)
+    scan(conn, demo_config(Config(db_path=str(db), rules_dirs=[str(d)])), ai=False)
+    (aid,) = [r["id"] for r in conn.execute("SELECT id FROM alerts WHERE rule_id = ?", (HOSTILE_ID,))]
+    tri = {"verdict": "true_positive", "severity": "high", "summary": HOSTILE, "next_steps": [HOSTILE],
+           "mitre_techniques": [HOSTILE], "confidence": 0.5}
+    conn.execute("UPDATE alerts SET triage = ?, model = ?, mitre = ?, note = ? WHERE id = ?",
+                 (json.dumps(tri), HOSTILE, json.dumps([HOSTILE]), HOSTILE, aid))
+    conn.commit()
+    conn.close()
+    bad = "\x1b\x07\x9b\u202e"
+    c = ["-c", str(cfg_file)]
+    for args in (["alerts", "--all", *c], ["show", str(aid), *c], ["report", *c], ["rules", "list", *c],
+                 ["rules", "list", "--skipped", *c],
+                 ["rules", "test", str(d / "evil.yml"), str(DEMO_DIR / "events.jsonl")]):
+        r = runner.invoke(app, args)
+        assert r.exit_code == 0, (args, r.output, r.exception)
+        assert not any(ch in r.output for ch in bad), args
+        assert "Evil" in r.output, args
+
+
+def test_rules_test_non_utf8_file_is_short_error(tmp_path):
+    bad = tmp_path / "bin.yml"
+    bad.write_bytes(b"title: \xff\xfe\x80 caf\xe9\n\xc3\x28\n")
+    r = runner.invoke(app, ["rules", "test", str(bad), str(DEMO_DIR / "events.jsonl")])
+    assert isinstance(r.exception, SystemExit) and r.exit_code == 1 and "Traceback" not in r.output
+    events = tmp_path / "ev.jsonl"
+    events.write_bytes(b"\xff\xfe\x00 not json\n")
+    rule = next(RULES_DIR.glob("*security_log_cleared*.yml"))
+    r = runner.invoke(app, ["rules", "test", str(rule), str(events)])
+    assert isinstance(r.exception, SystemExit) and "Traceback" not in r.output
+
+
+def _track_connect(monkeypatch):
+    conns = []
+    real = store.connect
+
+    def connect(*a, **k):
+        conns.append(real(*a, **k))
+        return conns[-1]
+
+    monkeypatch.setattr(store, "connect", connect)
+    return conns
+
+
+def _is_closed(conn):
+    import sqlite3
+
+    try:
+        conn.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return True
+    return False
+
+
+def test_demo_and_bench_close_connection_on_error(tmp_path, monkeypatch):
+    conns = _track_connect(monkeypatch)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("sentiel.cli.run_scan", boom)
+    r = runner.invoke(app, ["demo", "--no-ai", "-c", str(tmp_path / "missing.toml")])
+    assert isinstance(r.exception, RuntimeError) and len(conns) == 1 and _is_closed(conns[0])
+    monkeypatch.setattr("sentiel.bench.run_bench", boom)
+    r = runner.invoke(app, ["bench", "ollama/x", "--out", str(tmp_path / "b.md"), "-c", str(tmp_path / "missing.toml")])
+    assert isinstance(r.exception, RuntimeError) and len(conns) == 2 and _is_closed(conns[1])
+
+
+def test_bench_out_written_even_if_a_later_model_fails(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    def fake_triage(alert, events, http, model, mock, timeout):
+        if model == "bad/model":
+            raise RuntimeError("kaboom")
+        t = SimpleNamespace(severity="high", mitre_techniques=[], verdict="true_positive")
+        return SimpleNamespace(triage=t, valid_first_try=True, latency_ms=10, cost_usd=0.0)
+
+    monkeypatch.setattr("sentiel.bench.triage_alert", fake_triage)
+    out = tmp_path / "b.md"
+    r = runner.invoke(app, ["bench", "good/model,bad/model", "--out", str(out), "-c", str(tmp_path / "missing.toml")])
+    assert isinstance(r.exception, RuntimeError)
+    assert "good/model" in out.read_text(encoding="utf-8")
+
+
+def test_write_atomic_keeps_file_mode(tmp_path):
+    import os
+    import sys
+
+    from sentiel.cli import _write_atomic
+
+    if sys.platform == "win32":
+        pytest.skip("POSIX modes only")
+    f = tmp_path / "R.md"
+    f.write_text("old", encoding="utf-8")
+    os.chmod(f, 0o640)
+    _write_atomic(f, "new")
+    assert f.read_text(encoding="utf-8") == "new" and (f.stat().st_mode & 0o777) == 0o640
+
+
+def test_config_errors_sanitize_and_cap_key_names(tmp_path):
+    f = tmp_path / "sentiel.toml"
+    for toml in ('[keys]\n"\\u001b[31mX" = "SECRET"\n', '"\\u001b[31mX" = 1\n'):
+        f.write_text(toml, encoding="utf-8")
+        with pytest.raises(ValueError) as exc:
+            load_config(f)
+        msg = describe_error(exc.value)
+        assert "\x1b" not in msg and "?[31mX" in msg and "SECRET" not in msg
+        for cmd in ("scan", "doctor"):
+            r = runner.invoke(app, [cmd, "--no-ai", "-c", str(f)])
+            assert "\x1b" not in r.output and "SECRET" not in r.output
+    huge = "k" * 10_000
+    for toml in (f'[keys]\n{huge} = "SECRET"\n', f"{huge} = 1\n"):
+        f.write_text(toml, encoding="utf-8")
+        with pytest.raises(ValueError) as exc:
+            load_config(f)
+        msg = describe_error(exc.value)
+        assert huge not in msg and "..." in msg and len(msg) < 600 and "SECRET" not in msg
+        for cmd in ("scan", "doctor"):
+            r = runner.invoke(app, [cmd, "--no-ai", "-c", str(f)])
+            assert huge not in r.output and "SECRET" not in r.output and "Traceback" not in r.output
+
+
+def test_env_vars_fill_model_keys_notify_after_validation(tmp_path, monkeypatch):
+    env = {"SENTIEL_MODEL": "ollama/envmodel", "ABUSEIPDB_API_KEY": "a-key", "VT_API_KEY": "v-key",
+           "TELEGRAM_BOT_TOKEN": "123:tok", "TELEGRAM_CHAT_ID": "42", "DISCORD_WEBHOOK": "https://d.example/w"}
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    f = tmp_path / "empty.toml"
+    f.write_text("", encoding="utf-8")
+    cfg = load_config(f)
+    assert cfg.model == "ollama/envmodel"
+    assert cfg.keys == {"abuseipdb": "a-key", "virustotal": "v-key"}
+    assert cfg.notify == {"telegram_bot_token": "123:tok", "telegram_chat_id": "42",
+                          "discord_webhook": "https://d.example/w"}
+
+
+def test_show_hides_c1_bidi_and_zero_width_in_event_json(tmp_path):
+    cfg_file, conn = _populated(tmp_path)
+    (eid,) = json.loads(conn.execute("SELECT event_ids FROM alerts WHERE id = 1").fetchone()[0])[:1]
+    raw = json.loads(conn.execute("SELECT raw FROM logs WHERE id = ?", (eid,)).fetchone()[0])
+    raw["fields"]["Hostile"] = "a\x1b[31mb\x9bc\u202ed\u200be"
+    conn.execute("UPDATE logs SET raw = ? WHERE id = ?", (json.dumps(raw), eid))
+    conn.commit()
+    r = runner.invoke(app, ["show", "1", "-c", str(cfg_file)])
+    assert r.exit_code == 0, (r.output, r.exception)
+    assert "Hostile" in r.output
+    assert not any(c in r.output for c in "\x1b\x9b\u202e\u200b")
+
+
+def test_multiline_ai_text_keeps_line_breaks_but_no_controls(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    cfg_file, conn = _populated(tmp_path)
+    tri = {"verdict": "true_positive", "severity": "high", "summary": "sum1\nsum2\x1b", "next_steps": ["step1\nstep2"],
+           "mitre_techniques": [], "confidence": 0.5}
+    conn.execute("UPDATE alerts SET triage = ?, model = 'm' WHERE id = 1", (json.dumps(tri),))
+    conn.commit()
+    out = runner.invoke(app, ["show", "1", "-c", str(cfg_file)]).output
+    lines = out.splitlines()
+    for a, b in (("sum1", "sum2"), ("step1", "step2")):
+        assert [i for i, ln in enumerate(lines) if a in ln] != [i for i, ln in enumerate(lines) if b in ln]
+    assert "\x1b" not in out
+    fake = SimpleNamespace(sql="SELECT 1\nFROM x", answer="ans1\nans2\x1b")
+    monkeypatch.setattr("sentiel.chat.ask", lambda *a, **k: fake)
+    out = runner.invoke(app, ["chat", "q", "-c", str(cfg_file)]).output
+    assert "ans1\nans2" in out and "\x1b" not in out
+    sql_lines = out.splitlines()
+    at = [[i for i, ln in enumerate(sql_lines) if s in ln] for s in ("SELECT 1", "FROM x")]
+    assert at[0] and at[1] and at[0] != at[1]
+
+
+def test_describe_error_caps_number_of_errors_and_length(tmp_path):
+    f = tmp_path / "sentiel.toml"
+    f.write_text("".join(f"k{i} = 1\n" for i in range(30)), encoding="utf-8")
+    with pytest.raises(ValueError) as exc:
+        load_config(f)
+    msg = describe_error(exc.value)
+    assert "k0" in msg and "k29" not in msg and "and 20 more" in msg and len(msg) <= 1500
