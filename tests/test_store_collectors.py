@@ -233,7 +233,7 @@ def test_line_longer_than_the_read_cap_still_advances_and_counts_a_skip(tmp_path
 
 def test_only_newline_splits_lines_so_attacker_cannot_forge_events(tmp_path):
     p = tmp_path / "a.log"
-    p.write_bytes("user=eve\x0buser=root user=admin\n".encode())
+    p.write_bytes("user=eve\x0buser=root\u2028user=admin\n".encode())
     evs = list(read_regex(FileSource(path=str(p), regex=r"^user=(?P<User>\w+)"), {}))
     assert [e.fields["User"] for e in evs] == ["eve"]
 

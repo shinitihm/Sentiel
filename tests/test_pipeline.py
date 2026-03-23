@@ -117,6 +117,19 @@ def test_telegram_error_never_leaks_token(conn):
     assert send({"telegram_bot_token": "SECRET", "telegram_chat_id": "1"}, "hi", client) == {"telegram": False}
 
 
+def test_malformed_webhook_and_token_fail_the_channel_without_raising():
+    from sentiel.notify import send
+
+    def handler(request):
+        return httpx.Response(200)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert send({"discord_webhook": "http://[::1"}, "hi", client) == {"discord": False}
+    assert send({"discord_webhook": "https://"}, "hi", client) == {"discord": False}
+    assert send({"telegram_bot_token": "bad token/\x00 [x", "telegram_chat_id": "1"}, "hi", client) == {
+        "telegram": False}
+
+
 def test_one_failing_channel_does_not_starve_the_working_one(conn, cfg):
     cfg.notify = {"telegram_bot_token": "SECRET", "telegram_chat_id": "1",
                   "discord_webhook": "https://discord.example/hook"}
@@ -630,5 +643,5 @@ def test_scan_survives_triage_exception(conn, cfg, monkeypatch):
     monkeypatch.setattr(pipeline, "triage_pending", boom)
     monkeypatch.setattr(pipeline, "_notify", lambda *a: notified.append(1))
     s = scan(conn, cfg)
-    assert any(w.startswith("triage failed: ") and "model exploded" in w for w in s.warnings)
+    assert "triage failed: RuntimeError" in s.warnings and not any("model exploded" in w for w in s.warnings)
     assert notified and store.get_state(conn, "heartbeat")

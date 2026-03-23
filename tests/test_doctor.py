@@ -149,3 +149,11 @@ def test_doctor_missing_sysmon_channel_is_warn(tmp_path, monkeypatch):
     checks = doctor._check_sources(Config(sources=Sources(windows=True)))
     missing = [c for c in checks if c.detail == "channel not installed"]
     assert missing and all(not c.ok and not c.critical for c in missing)
+
+
+def test_doctor_reports_unknown_key(tmp_path):
+    f = tmp_path / "sentiel.toml"
+    f.write_text('intervall = 30\n[notify]\ntelegram_bot_tokn = "123:SECRET"\n', encoding="utf-8")
+    r = runner.invoke(app, ["doctor", "--no-ai", "-c", str(f)])
+    assert r.exit_code == 1 and "config" in r.output and "intervall" in r.output
+    assert "SECRET" not in r.output
