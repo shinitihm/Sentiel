@@ -221,3 +221,62 @@ def test_community_files_exist_and_cross_link():
     for heading in ("[1.0.0]", "[0.4.0]", "[0.3.0]", "[0.2.0]", "[0.1.1]"):
         assert f"## {heading}" in changelog
 
+
+def test_ci_runs_on_push_and_pull_request_to_main():
+    on = triggers(load("workflows/ci.yml"))
+    assert on["push"] == {"branches": ["main"]}
+    assert on["pull_request"] == {"branches": ["main"]}
+
+
+def test_cd_deploys_only_after_ci_on_push_to_main():
+    jobs = load("workflows/ci.yml")["jobs"]
+    deploy = jobs["deploy"]
+    assert set(deploy["needs"]) == {"test", "build", "container"}
+    assert deploy["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    assert deploy["permissions"] == {"contents": "read", "packages": "write"}
+    assert deploy["environment"]["name"] == "ghcr"
+    assert deploy["concurrency"]["cancel-in-progress"] is False
+    for name, job in jobs.items():
+        if name != "deploy":
+            assert "permissions" not in job and "if" not in job, name  # only the CD job can write
+    pushes = [s for s in deploy["steps"] if str(s.get("uses", "")).startswith("docker/build-push-action@")]
+    assert len(pushes) == 1 and pushes[0]["with"]["push"] is True
+    runs = "\n".join(s.get("run", "") for s in deploy["steps"])
+    assert "docker pull" in runs and "image_check.py demo-output" in runs  # verifies what was published
+
+
+def test_ci_container_job_builds_without_pushing_and_smoke_tests():
+    job = load("workflows/ci.yml")["jobs"]["container"]
+    assert job["needs"] == "build"
+    (build,) = [s for s in job["steps"] if str(s.get("uses", "")).startswith("docker/build-push-action@")]
+    assert build["with"]["push"] is False and build["with"]["load"] is True
+    runs = "\n".join(s.get("run", "") for s in job["steps"])
+    assert "expected-version" in runs and "demo-output" in runs
+
+
+def test_ci_run_steps_do_not_interpolate_expressions():
+    for job in load("workflows/ci.yml")["jobs"].values():
+        for step in job["steps"]:
+            assert "${{" not in step.get("run", "")
+
+
+def test_dockerfile_installs_ci_wheel_as_non_root():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "COPY dist/*.whl" in dockerfile
+    assert "\nUSER sentiel" in dockerfile
+    assert 'ENTRYPOINT ["sentiel"]' in dockerfile
+    dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8").split()
+    assert dockerignore[dockerignore.index("*"):] == ["*", "!dist/*.whl"]
+
+
+def test_image_check_script(tmp_path):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    try:
+        import image_check
+    finally:
+        sys.path.pop(0)
+    from sentiel import __version__
+
+    assert image_check.expected_version() == __version__
+    assert image_check.check_demo_output("... Detected attacks ...") == []
+    assert image_check.check_demo_output("Traceback (most recent call last)")

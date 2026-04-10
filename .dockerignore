@@ -1,0 +1,3 @@
+# Só o wheel gerado pela CI entra na imagem.
+*
+!dist/*.whl

@@ -7,6 +7,7 @@
 ![GitHub open pull requests](https://img.shields.io/github/issues-pr/shinitihm/Sentiel?style=for-the-badge)
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.11-blue?style=for-the-badge)
 ![License](https://img.shields.io/github/license/shinitihm/Sentiel?style=for-the-badge)
+![CI/CD](https://img.shields.io/github/actions/workflow/status/shinitihm/Sentiel/ci.yml?branch=main&label=CI%2FCD&style=for-the-badge)
 
 [Português](https://github.com/shinitihm/Sentiel/blob/main/README.pt-BR.md)
 
@@ -41,6 +42,16 @@ pipx install sentiel
 sentiel doctor
 sentiel demo --no-ai
 ```
+
+Or run it with Docker. Every push to `main` that passes CI publishes a new image to the GitHub Container Registry (tags `latest`, `main` and `sha-<commit>`):
+
+```
+docker run --rm ghcr.io/shinitihm/sentiel:latest                  # demo, no AI
+docker run --rm ghcr.io/shinitihm/sentiel:latest doctor --no-ai
+docker run --rm -v "$PWD:/data" -v /var/log:/host/log:ro ghcr.io/shinitihm/sentiel:latest scan --no-ai
+```
+
+In the container the working folder is `/data` (put `sentiel.toml` there and point `linux_auth` at `/host/log/auth.log`). Windows Event Log collection needs a native install.
 
 To work on the code, install from source:
 
