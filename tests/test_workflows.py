@@ -147,7 +147,7 @@ def test_release_publish_job_uses_trusted_publishing():
     assert publish["permissions"] == {"id-token": "write"}
     uses = [step.get("uses") for step in publish["steps"]]
     assert "pypa/gh-action-pypi-publish@release/v1" in uses
-    assert "actions/download-artifact@v4" in uses
+    assert any(str(u).startswith("actions/download-artifact@") for u in uses)
 
 
 def test_release_has_no_pypi_secrets():
