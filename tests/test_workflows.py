@@ -42,6 +42,37 @@ def test_ci_has_build_job_checking_dist():
     assert "python scripts/check_dist.py dist" in commands
 
 
+def test_ci_build_uploads_dist_artifact():
+    steps = load("workflows/ci.yml")["jobs"]["build"]["steps"]
+    uploads = [s for s in steps if str(s.get("uses", "")).startswith("actions/upload-artifact@")]
+    assert uploads
+    assert any(s["with"]["name"] == "dist" for s in uploads)
+
+
+def test_ci_deploy_publishes_tested_artifact():
+    deploy = load("workflows/ci.yml")["jobs"]["deploy"]
+    assert {"test", "build"} <= set(deploy["needs"])
+    assert "push" in deploy["if"] and "refs/heads/main" in deploy["if"]
+    downloads = [s for s in deploy["steps"] if str(s.get("uses", "")).startswith("actions/download-artifact@")]
+    assert any(s["with"]["name"] == "dist" for s in downloads)
+    for step in deploy["steps"]:
+        assert "python -m build" not in step.get("run", "")
+
+
+def test_ci_never_swallows_errors():
+    for job in load("workflows/ci.yml")["jobs"].values():
+        for step in job["steps"]:
+            assert "|| true" not in step.get("run", "")
+
+
+def test_ci_deploy_verifies_published_site():
+    steps = load("workflows/ci.yml")["jobs"]["deploy"]["steps"]
+    last = steps[-1]
+    assert last.get("name") == "Verificar site publicado"
+    assert "steps.deployment.outputs.page_url" in last["env"]["PAGE_URL"]
+    assert "${{" not in last["run"]
+
+
 def test_release_triggers_only_on_version_tags():
     doc = load("workflows/release.yml")
     on = triggers(doc)
