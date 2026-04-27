@@ -187,7 +187,7 @@ def test_set_suppress_prints_toml_that_roundtrips(tmp_path):
     cfg_file, conn = _populated(tmp_path)
     row = store.get_alert(conn, 1)
     first = store.get_events(conn, [json.loads(row["event_ids"])[0]])[0]
-    nasty = 'a"b\c [red]x[/] \né\x7f'
+    nasty = 'a"b\\c [red]x[/] \né\x7f'
     conn.execute("UPDATE logs SET raw = ? WHERE id = ?",
                  (json.dumps({"ts": first["ts"], "host": first["host"], "fields": {**first["fields"], "Nasty": nasty}}),
                   first["id"]))
