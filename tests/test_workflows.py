@@ -42,6 +42,51 @@ def test_ci_has_build_job_checking_dist():
     assert "python scripts/check_dist.py dist" in commands
 
 
+def steps_using(steps: list, action: str) -> list:
+    # Compara so o prefixo `owner/action@`, sem fixar versao (o Dependabot atualiza).
+    return [step for step in steps if str(step.get("uses", "")).startswith(f"{action}@")]
+
+
+def test_ci_deploy_needs_test_and_build():
+    needs = load("workflows/ci.yml")["jobs"]["deploy"]["needs"]
+    needs = [needs] if isinstance(needs, str) else needs
+    assert {"test", "build"} <= set(needs)
+
+
+def test_ci_deploy_runs_only_on_push_to_main():
+    condition = load("workflows/ci.yml")["jobs"]["deploy"]["if"]
+    assert "github.event_name == 'push'" in condition
+    assert "github.ref == 'refs/heads/main'" in condition
+    assert "&&" in condition and "||" not in condition
+
+
+def test_ci_pages_permissions_only_in_deploy():
+    doc = load("workflows/ci.yml")
+    assert "pages" not in doc["permissions"] and "id-token" not in doc["permissions"]
+    for name, job in doc["jobs"].items():
+        permissions = job.get("permissions", {})
+        if name == "deploy":
+            assert permissions.get("pages") == "write"
+            assert permissions.get("id-token") == "write"
+        else:
+            assert "pages" not in permissions and "id-token" not in permissions, name
+
+
+def test_ci_deploy_has_no_checkout():
+    # Sem checkout, `import sentiel` no deploy so pode vir do wheel instalado, nunca do codigo-fonte local.
+    steps = load("workflows/ci.yml")["jobs"]["deploy"]["steps"]
+    assert not steps_using(steps, "actions/checkout")
+
+
+def test_ci_build_uploads_dist_and_deploy_downloads_it():
+    jobs = load("workflows/ci.yml")["jobs"]
+    uploads = steps_using(jobs["build"]["steps"], "actions/upload-artifact")
+    downloads = steps_using(jobs["deploy"]["steps"], "actions/download-artifact")
+    assert [step["with"]["name"] for step in uploads] == ["dist"]
+    assert [step["with"]["name"] for step in downloads] == ["dist"]
+    assert uploads[0]["with"]["path"].rstrip("/") == "dist"
+
+
 def test_release_triggers_only_on_version_tags():
     doc = load("workflows/release.yml")
     on = triggers(doc)
@@ -147,7 +192,7 @@ def test_release_publish_job_uses_trusted_publishing():
     assert publish["permissions"] == {"id-token": "write"}
     uses = [step.get("uses") for step in publish["steps"]]
     assert "pypa/gh-action-pypi-publish@release/v1" in uses
-    assert "actions/download-artifact@v4" in uses
+    assert any(str(u).startswith("actions/download-artifact@") for u in uses)
 
 
 def test_release_has_no_pypi_secrets():
