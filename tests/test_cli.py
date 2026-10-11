@@ -1,9 +1,10 @@
 import re
 
+import litellm
 import pytest
 from typer.testing import CliRunner
 
-from sentiel import store
+from sentiel import __version__, store
 from sentiel.cli import app
 from sentiel.config import Config, load_config
 
@@ -12,6 +13,39 @@ runner = CliRunner(env={"COLUMNS": "250"})
 
 def plain(text: str) -> str:
     return re.sub(r"\s+", " ", text)
+
+
+def _model_down(monkeypatch):
+    def boom(**_):
+        raise litellm.Timeout("t", "m", "p")
+    monkeypatch.setattr(litellm, "completion", boom)
+
+
+def test_version_prints_package_version():
+    r = runner.invoke(app, ["version"])
+    assert r.exit_code == 0 and __version__ in r.output
+
+
+def test_chat_with_model_down_exits_1_without_traceback(tmp_path, monkeypatch):
+    _model_down(monkeypatch)
+    cfg_file = tmp_path / "sentiel.toml"
+    cfg_file.write_text(f'db_path = "{(tmp_path / "s.db").as_posix()}"\nmodel = "ollama/x"\n', encoding="utf-8")
+    r = runner.invoke(app, ["chat", "how many alerts?", "-c", str(cfg_file)])
+    assert r.exit_code == 1 and "Model unavailable" in plain(r.output)
+    assert isinstance(r.exception, SystemExit) and "Traceback" not in r.output
+
+
+def test_bench_with_all_models_down_still_writes_markdown(tmp_path, monkeypatch):
+    _model_down(monkeypatch)
+    out = tmp_path / "bench.md"
+    r = runner.invoke(app, ["bench", "ollama/x", "--out", str(out), "-c", str(tmp_path / "missing.toml")])
+    assert r.exit_code == 0, r.output
+    assert out.read_text(encoding="utf-8") == "_No model produced results._\n"
+
+
+def test_bench_with_empty_model_list_is_a_usage_error():
+    r = runner.invoke(app, ["bench", ","])
+    assert r.exit_code != 0 and not isinstance(r.exception, IndexError)
 
 
 def test_demo_without_ai_lists_all_seven_attacks():

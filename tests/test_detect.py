@@ -1,12 +1,15 @@
 import json
+import os
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+import sentiel.detect as detect_mod
 from sentiel import store
 from sentiel.collectors import read_json, read_linux_auth
-from sentiel.detect import detect, load_rules
+from sentiel.detect import RULES_DIR, detect, load_rules
 from sentiel.models import Event
 
 DEMO = Path(__file__).parent.parent / "sentiel" / "demo"
@@ -27,6 +30,44 @@ def rules():
 
 def ev(minutes: float, source="windows", **fields) -> Event:
     return Event(ts=T0 + timedelta(minutes=minutes), source=source, host="h", fields=fields)
+
+
+def _spy_parses(monkeypatch):
+    calls = []
+    real = detect_mod.SigmaCollection.from_yaml
+    monkeypatch.setattr(detect_mod.SigmaCollection, "from_yaml", lambda y: calls.append(1) or real(y))
+    return calls
+
+
+def test_rules_are_converted_once_while_files_are_unchanged(tmp_path, monkeypatch):
+    d = shutil.copytree(RULES_DIR, tmp_path / "rules")
+    calls = _spy_parses(monkeypatch)
+    first, _ = load_rules(d)
+    n = len(calls)
+    second, _ = load_rules(d)
+    assert len(calls) == n and [r.id for r in first] == [r.id for r in second]
+
+
+def test_edited_added_or_removed_rule_file_is_picked_up(tmp_path, monkeypatch):
+    d = shutil.copytree(RULES_DIR, tmp_path / "rules")
+    base = len(load_rules(d)[0])
+    victim = sorted(d.rglob("*.yml"))[0]
+    st = victim.stat()
+    os.utime(victim, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+    calls = _spy_parses(monkeypatch)
+    load_rules(d)
+    assert len(calls) > 0  # edit invalidates
+    victim.unlink()
+    assert len(load_rules(d)[0]) == base - 1  # removal invalidates
+
+
+def test_returned_lists_are_safe_to_mutate(tmp_path):
+    d = shutil.copytree(RULES_DIR, tmp_path / "rules")
+    rules, warnings = load_rules(d)
+    rules.clear()
+    warnings.append("x")
+    again, w2 = load_rules(d)
+    assert again and "x" not in w2
 
 
 def test_golden_demo_detects_exactly_expected_rules(conn, rules):

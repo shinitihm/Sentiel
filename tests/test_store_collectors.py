@@ -1,5 +1,5 @@
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sentiel import store
 from sentiel.collectors import parse_auth_line, parse_event_xml, read_json, read_linux_auth
@@ -54,6 +54,29 @@ def test_parse_auth_lines():
     assert parse_auth_line("garbage") is None
 
 
+SSH = " h sshd[1]: Accepted password for bob from 1.2.3.4 port 22 ssh2"
+
+
+def test_bsd_date_after_today_belongs_to_last_year():
+    e = parse_auth_line("Dec 30 12:00:00" + SSH, now=datetime(2027, 1, 2, 10, 0))
+    assert e.ts.astimezone().date() == date(2026, 12, 30)
+
+
+def test_bsd_recent_date_keeps_current_year():
+    e = parse_auth_line("Jan  1 12:00:00" + SSH, now=datetime(2027, 1, 2, 10, 0))
+    assert (e.ts.astimezone().year, e.ts.astimezone().month) == (2027, 1)
+
+
+def test_bsd_up_to_one_day_ahead_is_clock_skew_not_last_year():
+    e = parse_auth_line("Oct 12 12:00:00" + SSH, now=datetime(2026, 10, 11, 23, 0))
+    assert e.ts.astimezone().year == 2026
+
+
+def test_bsd_feb_29_read_in_non_leap_year_uses_last_leap_year():
+    e = parse_auth_line("Feb 29 12:00:00" + SSH, now=datetime(2025, 1, 15, 10, 0))
+    assert e.ts.astimezone().date() == date(2024, 2, 29)
+
+
 def test_linux_collector_offsets_and_partial_lines(tmp_path):
     p = tmp_path / "auth.log"
     line = "2026-10-09T08:00:00+00:00 h sshd[1]: Accepted password for bob from 1.2.3.4 port 22 ssh2\n"
@@ -66,6 +89,21 @@ def test_linux_collector_offsets_and_partial_lines(tmp_path):
     stats = Counter()
     list(read_linux_auth(p, state, stats))
     assert state["offset"] == 2 and stats["skipped"] == 1
+
+
+def test_iso_timestamp_with_invalid_date_is_unparseable():
+    assert parse_auth_line("2026-13-45T00:00:00 h sshd[1]: x") is None
+
+
+def test_linux_collector_survives_invalid_iso_timestamp(tmp_path):
+    p = tmp_path / "auth.log"
+    bad = "2026-13-45T00:00:00 h sshd[1]: x\n"
+    good = "2026-10-09T08:00:00+00:00 h sshd[1]: Failed password for bob from 1.2.3.4 port 22 ssh2\n"
+    p.write_bytes((bad + good).encode())
+    state: dict = {}
+    stats = Counter()
+    assert len(list(read_linux_auth(p, state, stats))) == 1
+    assert stats["skipped"] == 1 and state["offset"] == p.stat().st_size
 
 
 def test_json_collector_skips_garbage_and_flattens(tmp_path):
