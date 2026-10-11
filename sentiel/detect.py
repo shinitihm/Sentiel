@@ -1,3 +1,4 @@
+import functools
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -47,8 +48,9 @@ CORRELATIONS = (
 LOOKBACK = timedelta(hours=1)
 
 
-def load_rules(rules_dir: Path = RULES_DIR) -> tuple[list[Rule], list[str]]:
-    """Returns (rules, warnings). A rule that fails to parse or convert is skipped, not fatal."""
+@functools.lru_cache(maxsize=8)
+def _load(rules_dir: str, signature: tuple[tuple[str, int], ...]) -> tuple[tuple[Rule, ...], tuple[str, ...]]:
+    # `signature` is only a cache key: a change in any rule file's path or mtime makes it a new entry.
     backend = sqliteBackend()
     rules, warnings = [], []
     for path in sorted(Path(rules_dir).rglob("*.yml")):
@@ -60,7 +62,17 @@ def load_rules(rules_dir: Path = RULES_DIR) -> tuple[list[Rule], list[str]]:
                                   tuple(backend.convert_rule(r))))
         except Exception as e:  # pySigma raises many unrelated exception types
             warnings.append(f"{path.name}: {e}")
-    return rules, warnings
+    return tuple(rules), tuple(warnings)
+
+
+def load_rules(rules_dir: Path = RULES_DIR) -> tuple[list[Rule], list[str]]:
+    """Returns (rules, warnings). A rule that fails to parse or convert is skipped, not fatal.
+
+    Conversion is cached per directory and re-run only when a rule file is added, removed or modified.
+    """
+    signature = tuple((str(p), p.stat().st_mtime_ns) for p in sorted(Path(rules_dir).rglob("*.yml")))
+    rules, warnings = _load(str(rules_dir), signature)
+    return list(rules), list(warnings)
 
 
 def _run_rule(conn: sqlite3.Connection, rule: Rule, since_id: int) -> list[Alert]:
