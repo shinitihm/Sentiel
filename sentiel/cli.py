@@ -82,7 +82,6 @@ def scan_cmd(config: ConfigOpt = Path("sentiel.toml"), model: ModelOpt = None, n
     console.print(alerts_table(store.list_alerts(conn, 15), "Latest alerts"))
 
 
-
 @app.command()
 def watch(config: ConfigOpt = Path("sentiel.toml"), model: ModelOpt = None, no_ai: NoAiOpt = False) -> None:
     """Keep scanning every `interval` seconds. Ctrl+C to stop."""
@@ -178,3 +177,98 @@ def report(config: ConfigOpt = Path("sentiel.toml")) -> None:
     console.print(f"Contested by AI: {contested}   Triaged: {sum(1 for r in rows if r['triage'])}/{len(rows)}   "
                   f"AI cost so far: ${cost:.4f}")
 
+
+@app.command()
+def demo(model: ModelOpt = None, no_ai: NoAiOpt = False, config: ConfigOpt = Path("sentiel.toml")) -> None:
+    """Run the full pipeline on built-in simulated attacks (7 attacks, one with prompt injection)."""
+    cfg = demo_config(load_config(config))
+    if model:
+        cfg.model = model
+    with tempfile.TemporaryDirectory() as tmp:
+        conn = store.connect(Path(tmp) / "demo.db")
+        console.print(f"Simulated attacks on a Windows desktop and a Linux server. "
+                      f"AI: {'off' if no_ai else '[bold]' + escape(cfg.model) + '[/]'}")
+        _print_summary(run_scan(conn, cfg, ai=not no_ai))
+        console.print(alerts_table(store.list_alerts(conn, 50), "Detected attacks"))
+        if no_ai:
+            console.print("\nRe-run without --no-ai (e.g. `ollama pull llama3.1:8b`) to see AI triage.")
+        conn.close()
+
+
+@app.command()
+def bench(models: Annotated[str, typer.Argument(help="Comma-separated LiteLLM models")],
+          out: Path = Path("bench.md"), config: ConfigOpt = Path("sentiel.toml")) -> None:
+    """Compare models on the demo attacks: severity, MITRE recall, JSON validity, injection resistance, cost."""
+    from .bench import run_bench, to_markdown
+
+    model_list = [m.strip() for m in models.split(",") if m.strip()]
+    if not model_list:
+        raise typer.BadParameter("no models given")
+    cfg = load_config(config)
+    with tempfile.TemporaryDirectory() as tmp:
+        conn = store.connect(Path(tmp) / "bench.db")
+        scores = run_bench(model_list, cfg, conn)
+        conn.close()
+    t = Table(title="Model benchmark (demo attacks)")
+    rows = [s.row for s in scores]
+    cols = list(next((r for r in rows if len(r) > 2), rows[0]))
+    for c in cols:
+        t.add_column(c)
+    for r in rows:
+        t.add_row(*[escape(r.get(c, "")) for c in cols])
+    console.print(t)
+    out.write_text(to_markdown(scores), encoding="utf-8")
+    console.print(f"Markdown table written to {out}")
+
+
+@app.command()
+def chat(question: Annotated[str, typer.Argument(help="Question about your logs")], model: ModelOpt = None,
+         config: ConfigOpt = Path("sentiel.toml")) -> None:
+    """Ask a question in natural language; the model writes a read-only SQL query."""
+    from .chat import ask
+    from .triage import LLMUnavailable
+
+    cfg, conn = _setup(config, model)
+    _privacy_notice(conn, cfg.model)
+    conn.close()
+    try:
+        res = ask(cfg.db_path, question, cfg.model, timeout=cfg.llm_timeout)
+    except LLMUnavailable as e:
+        console.print(f"[red]Model unavailable:[/] {escape(str(e))}")
+        raise typer.Exit(1) from e
+    console.print(Panel(escape(res.sql), title="SQL (read-only)", border_style="dim"))
+    console.print(escape(res.answer))
+
+
+@app.command()
+def doctor(config: ConfigOpt = Path("sentiel.toml"), model: ModelOpt = None, no_ai: NoAiOpt = False) -> None:
+    """Diagnose config, database, rules, log sources, model and notifications."""
+    from .doctor import Check, run_checks
+
+    try:
+        cfg = load_config(config)
+    except (ValueError, OSError) as e:  # invalid toml/values, or unreadable file (e.g. /etc/sentiel as non-root)
+        checks = [Check("config", False, str(e), critical=True)]
+    else:
+        if model:
+            cfg.model = model
+        checks = run_checks(cfg, ai=not no_ai)
+    table = Table(title="Sentiel doctor")
+    for col in ("Check", "Status", "Detail"):
+        table.add_column(col)
+    for c in checks:
+        status = "[green]OK[/]" if c.ok else ("[red]FAIL[/]" if c.critical else "[yellow]WARN[/]")
+        table.add_row(escape(c.name), status, escape(c.detail))
+    console.print(table)
+    if any(c.critical and not c.ok for c in checks):
+        raise typer.Exit(1)
+
+
+@app.command()
+def version() -> None:
+    """Print the version."""
+    console.print(__version__)
+
+
+if __name__ == "__main__":
+    app()
