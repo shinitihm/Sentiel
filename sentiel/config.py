@@ -29,6 +29,7 @@ class Config(BaseModel):
     interval: int = Field(30, ge=1)
     llm_timeout: int = Field(120, ge=5)
     max_triage_per_cycle: int = Field(50, ge=0)
+    triage_concurrency: int = Field(1, ge=1)
     notify_min_severity: Severity = "high"
     db_path: str = "sentiel.db"
     enrich: bool = False
