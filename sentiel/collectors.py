@@ -10,9 +10,11 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from .config import FileSource
 from .models import Event
 
 INT64 = 2**63 - 1
+MAX_READ = 32 * 2**20  # bytes per text-log read: a multi-GB first run is consumed over several cycles
 
 # ---------- JSON (jsonl) ----------
 
@@ -96,29 +98,75 @@ def parse_auth_line(line: str, now: datetime | None = None) -> Event | None:
             fields["event"] = name
             fields.update({k: v for k, v in pm.groupdict().items() if v})
             break
-    return Event(ts=ts, source="linux", host=m["host"], fields=fields)
+    try:
+        return Event(ts=ts, source="linux", host=m["host"], fields=fields)
+    except ValidationError:  # timestamp out of range
+        return None
 
 
-def read_linux_auth(path: str | Path, state: dict, stats: Counter | None = None) -> Iterator[Event]:
-    """Reads only complete lines after state['offset']; resets on rotation (file shrank)."""
-    stats = stats if stats is not None else Counter()
+def _new_lines(path: str | Path, state: dict, stats: Counter) -> Iterator[str]:
+    """Complete, non-blank lines after state['offset'], at most MAX_READ bytes per call; resets on rotation."""
     path = Path(path)
     offset = int(state.get("offset", 0))
     if path.stat().st_size < offset:
         offset = 0
     with open(path, "rb") as f:
         f.seek(offset)
-        data = f.read()
+        data = f.read(MAX_READ)
     end = data.rfind(b"\n") + 1
-    for line in data[:end].decode("utf-8", errors="replace").splitlines():
-        if not line.strip():
-            continue
+    if not end and len(data) == MAX_READ:
+        # ponytail: a line longer than MAX_READ is dropped; its tail is read next cycle as a garbage line,
+        # which most likely does not parse and is skipped
+        stats["skipped"] += 1
+        state["offset"] = offset + MAX_READ
+        return
+    # split on \n only: str.splitlines() also breaks on \x0b, \x1c,  ... which would let a log line forge another
+    for raw in data[:end].split(b"\n"):
+        line = raw.rstrip(b"\r").decode("utf-8", errors="replace")
+        if line.strip():
+            yield line
+    state["offset"] = offset + end
+
+
+def read_linux_auth(path: str | Path, state: dict, stats: Counter | None = None) -> Iterator[Event]:
+    """Reads only complete lines after state['offset']; resets on rotation (file shrank)."""
+    stats = stats if stats is not None else Counter()
+    for line in _new_lines(path, state, stats):
         ev = parse_auth_line(line)
         if ev is None:
             stats["skipped"] += 1
         else:
             yield ev
-    state["offset"] = offset + end
+
+
+def read_regex(src: FileSource, state: dict, stats: Counter | None = None) -> Iterator[Event]:
+    """Any text log: named groups become fields; optional `ts` / `host` groups set the event time / host."""
+    stats = stats if stats is not None else Counter()
+    rx = re.compile(src.regex)
+    for line in _new_lines(src.path, state, stats):
+        m = rx.search(line)
+        if not m:
+            stats["skipped"] += 1
+            continue
+        groups = m.groupdict()
+        if groups.get("ts") is not None:
+            try:
+                ts = datetime.fromisoformat(groups["ts"])
+            except ValueError:
+                stats["skipped"] += 1
+                continue
+        else:
+            ts = datetime.now(UTC)
+        fields: dict[str, str | int | None] = {"message": line.rstrip("\r\n")}
+        fields.update({k: v for k, v in groups.items() if v is not None and k not in ("ts", "host")})
+        try:
+            if ts.tzinfo is None:
+                ts = ts.astimezone()  # no zone in the log: assume local time
+            ev = Event(ts=ts, source=src.product, host=groups.get("host") or socket.gethostname(), fields=fields)
+        except (ValueError, OverflowError, OSError):  # out-of-range timestamp
+            stats["skipped"] += 1
+            continue
+        yield ev
 
 
 # ---------- Windows Event Log ----------
