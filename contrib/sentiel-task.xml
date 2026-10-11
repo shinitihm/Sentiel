@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<!--
+  Replace the Command path below with the output of: where sentiel
+  From an elevated PowerShell:
+  1. Restrict the data folder (database and config hold alerts and secrets) to SYSTEM and Administrators:
+       icacls C:\ProgramData\Sentiel /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F"
+  2. The task runs as SYSTEM and does not see your user environment. Set LLM provider keys machine-wide:
+       [Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY','...','Machine')
+     (restart the task after changing them)
+  3. Register and start it now (the BootTrigger alone waits for the next reboot):
+       Register-ScheduledTask -TaskName Sentiel -Xml (Get-Content contrib\sentiel-task.xml -Raw)
+       Start-ScheduledTask -TaskName Sentiel
+  4. Verify with the service's config:
+       cd C:\ProgramData\Sentiel; sentiel doctor -c C:\ProgramData\Sentiel\sentiel.toml
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+    </BootTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Program Files\Sentiel\sentiel.exe</Command>
+      <Arguments>watch -c C:\ProgramData\Sentiel\sentiel.toml</Arguments>
+      <WorkingDirectory>C:\ProgramData\Sentiel</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

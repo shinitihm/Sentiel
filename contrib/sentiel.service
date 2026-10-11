@@ -1,0 +1,45 @@
+# Install sentiel system-wide: ProtectHome=true hides /home, so ExecStart must not point into it
+# (a plain `pipx install` in ~/.local/bin fails with 203/EXEC). Either:
+#   sudo pipx install --global sentiel          # -> /usr/local/bin/sentiel
+#   or a venv under /opt/sentiel (ExecStart=/opt/sentiel/bin/sentiel ...)
+# Then:
+#   sudo useradd --system sentiel
+#   sudo mkdir -p /etc/sentiel && sudo cp sentiel.toml /etc/sentiel/sentiel.toml
+#   # the toml holds AbuseIPDB/VirusTotal keys and notification tokens; the unit runs with Group=adm
+#   sudo chown root:adm /etc/sentiel/sentiel.toml && sudo chmod 640 /etc/sentiel/sentiel.toml
+#   # LLM provider keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, ...) are read only from the environment:
+#   # put KEY=value lines in /etc/sentiel/env, root-owned, and uncomment EnvironmentFile below
+#   sudo touch /etc/sentiel/env && sudo chown root:root /etc/sentiel/env && sudo chmod 600 /etc/sentiel/env
+#   sudo cp contrib/sentiel.service /etc/systemd/system/
+#   sudo systemctl enable --now sentiel
+# Verify with the service's own user and config:
+#   sudo -u sentiel sh -c 'cd /var/lib/sentiel && sentiel doctor -c /etc/sentiel/sentiel.toml'
+#   (that shell lacks the env file's keys, so a cloud model may show WARN there; check the journal)
+# Follow the logs:
+#   journalctl -u sentiel -f
+[Unit]
+Description=Sentiel personal SOC
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=sentiel
+# adm can read /var/log/auth.log on Debian/Ubuntu
+Group=adm
+StateDirectory=sentiel
+StateDirectoryMode=0700
+# database and state files: owner-only
+UMask=0077
+WorkingDirectory=/var/lib/sentiel
+# systemd reads the env file as root before dropping to User=sentiel
+#EnvironmentFile=/etc/sentiel/env
+ExecStart=/usr/local/bin/sentiel watch -c /etc/sentiel/sentiel.toml
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
