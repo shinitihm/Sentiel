@@ -1,0 +1,27 @@
+# Copy to sentiel.toml (git-ignored) and edit. Any LiteLLM model string works:
+#   ollama/llama3.1:8b           local, logs never leave this machine
+#   anthropic/claude-sonnet-5-5  needs ANTHROPIC_API_KEY
+#   openai/gpt-4o                needs OPENAI_API_KEY
+#   gemini/gemini-2.0-flash      needs GEMINI_API_KEY
+# Provider API keys are read from the usual environment variables.
+model = "ollama/llama3.1:8b"
+interval = 30                  # seconds between cycles in `sentiel watch`
+llm_timeout = 120              # seconds per model call; local models on CPU can be slow
+max_triage_per_cycle = 50      # cost guard: the rest stays pending
+notify_min_severity = "high"   # info | low | medium | high | critical
+db_path = "sentiel.db"
+enrich = false                 # true: look up public IPs (ip-api.com, plus AbuseIPDB/VirusTotal if keys are set)
+
+[sources]
+windows = true                 # needs administrator rights for the Security log
+# linux_auth = "/var/log/auth.log"
+# json = ["C:/logs/app.jsonl"] # JSON Lines, one event per line
+
+[keys]                         # or env vars ABUSEIPDB_API_KEY / VT_API_KEY
+abuseipdb = ""
+virustotal = ""
+
+[notify]                       # or env vars TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID / DISCORD_WEBHOOK
+telegram_bot_token = ""
+telegram_chat_id = ""
+discord_webhook = ""
