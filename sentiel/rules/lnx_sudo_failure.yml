@@ -1,0 +1,20 @@
+title: Linux Sudo Authentication Failure
+id: 6bbb3e1a-e211-459c-b565-7aa88a26f7e0
+status: experimental
+description: Failed sudo attempt (wrong password or user not in sudoers).
+references:
+  - https://attack.mitre.org/techniques/T1548/003/
+author: Sentiel
+tags:
+  - attack.privilege-escalation
+  - attack.t1548.003
+logsource:
+  product: linux
+  service: auth
+detection:
+  selection:
+    event: sudo_failed
+  condition: selection
+falsepositives:
+  - Users mistyping their password
+level: low

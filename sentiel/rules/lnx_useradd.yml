@@ -1,0 +1,20 @@
+title: Linux Local User Created
+id: 7769c24f-0ec2-4a3b-a1f0-b3c77fb442eb
+status: experimental
+description: A new local account was created with useradd (fields parsed by Sentiel's auth.log collector).
+references:
+  - https://attack.mitre.org/techniques/T1136/001/
+author: Sentiel
+tags:
+  - attack.persistence
+  - attack.t1136.001
+logsource:
+  product: linux
+  service: auth
+detection:
+  selection:
+    event: useradd
+  condition: selection
+falsepositives:
+  - Legitimate user provisioning
+level: medium

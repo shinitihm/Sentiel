@@ -1,0 +1,37 @@
+title: PowerShell With Encoded Command
+id: c1d3a684-f103-4ed2-bfa5-4ec0186d6b30
+status: experimental
+description: PowerShell started with a Base64-encoded command, commonly used to hide malicious scripts.
+references:
+  - https://attack.mitre.org/techniques/T1059/001/
+author: Sentiel (inspired by SigmaHQ process_creation rules)
+tags:
+  - attack.execution
+  - attack.t1059.001
+  - attack.defense-evasion
+  - attack.t1027
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  sysmon:
+    EventID: 1
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+  security:
+    EventID: 4688
+    NewProcessName|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+  encoded:
+    CommandLine|contains:
+      - ' -e '
+      - ' -en '
+      - ' -enc '
+      - ' -enco'
+      - ' -ec '
+  condition: (sysmon or security) and encoded
+falsepositives:
+  - Some admin and deployment tools
+level: high

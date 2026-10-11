@@ -1,0 +1,22 @@
+title: User Added To Local Administrators
+id: 79f18b61-eefc-4876-b069-6228e7942d8b
+status: experimental
+description: An account was added to the local Administrators group (S-1-5-32-544).
+references:
+  - https://attack.mitre.org/techniques/T1098/
+author: Sentiel
+tags:
+  - attack.persistence
+  - attack.privilege-escalation
+  - attack.t1098
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4732
+    TargetSid: 'S-1-5-32-544'
+  condition: selection
+falsepositives:
+  - Legitimate administrative changes
+level: high
