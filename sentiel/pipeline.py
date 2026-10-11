@@ -75,3 +75,49 @@ def triage_pending(conn: sqlite3.Connection, cfg: Config, summary: ScanSummary, 
         summary.triaged += 1
     summary.pending = conn.execute("SELECT count(*) FROM alerts WHERE triage IS NULL").fetchone()[0]
 
+
+def _notify(conn: sqlite3.Connection, cfg: Config, summary: ScanSummary, http: httpx.Client | None) -> None:
+    sent = 0
+    for row in store.unnotified_alerts(conn):
+        alert, triage = store.row_to_alert(row)
+        severity = effective_severity(alert.sigma_level, triage)
+        if RANK[severity] < RANK[cfg.notify_min_severity]:
+            store.mark_notified(conn, alert.id)  # below threshold: nothing to send, don't re-check forever
+            continue
+        if sent >= MAX_NOTIFY_PER_CYCLE:
+            break
+        events = store.get_events(conn, alert.event_ids[:1])
+        host = events[0]["host"] if events else "unknown"
+        text = format_message(alert, triage, severity, host, is_contested(alert.sigma_level, triage))
+        delivered = send(cfg.notify, text, http)
+        if delivered is None:
+            return  # no channel configured: leave flags alone so alerts fire once a channel is set up
+        if delivered:
+            store.mark_notified(conn, alert.id)
+            summary.notified += 1
+        sent += 1
+
+
+def scan(conn: sqlite3.Connection, cfg: Config, *, ai: bool = True, http: httpx.Client | None = None,
+         mock_response: str | list[str] | None = None) -> ScanSummary:
+    summary = ScanSummary()
+    ingest(conn, cfg.sources, summary)
+
+    rules, warnings = load_rules()
+    summary.warnings += [f"rule skipped: {w}" for w in warnings]
+    since = int(store.get_state(conn, "last_detected_log_id", "0"))
+    summary.new_alerts = store.insert_alerts(conn, detect(conn, rules, since))
+    last_id = conn.execute("SELECT coalesce(max(id), 0) FROM logs").fetchone()[0]
+    store.set_state(conn, "last_detected_log_id", str(last_id))
+
+    if ai:
+        triage_pending(conn, cfg, summary, http, mock_response)
+    else:
+        summary.pending = conn.execute("SELECT count(*) FROM alerts WHERE triage IS NULL").fetchone()[0]
+    _notify(conn, cfg, summary, http)
+    return summary
+
+
+def demo_config(cfg: Config) -> Config:
+    sources = Sources(windows=False, linux_auth=str(DEMO_DIR / "auth_log.txt"), json=[str(DEMO_DIR / "events.jsonl")])
+    return cfg.model_copy(update={"sources": sources, "enrich": False, "notify": {}})
