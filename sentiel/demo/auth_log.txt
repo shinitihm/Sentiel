@@ -1,0 +1,71 @@
+2026-10-09T08:04:18.870203+00:00 srv-demo CRON[1864]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T08:12:37.233360+00:00 srv-demo CRON[9975]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T08:36:22.056267+00:00 srv-demo CRON[6459]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T08:56:35.728674+00:00 srv-demo CRON[7962]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T08:58:44.714215+00:00 srv-demo sshd[9756]: Accepted publickey for deploy from 10.0.0.5 port 51234 ssh2
+2026-10-09T09:32:52.685710+00:00 srv-demo sudo[5761]:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/systemctl restart app
+2026-10-09T09:39:47.199982+00:00 srv-demo sudo[8856]:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/systemctl restart app
+2026-10-09T10:10:37.232343+00:00 srv-demo sudo[1858]:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/systemctl restart app
+2026-10-09T10:14:49.104133+00:00 srv-demo CRON[6439]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T10:17:21.904217+00:00 srv-demo CRON[1414]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T10:18:04.130373+00:00 srv-demo CRON[4508]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T10:25:47.900726+00:00 srv-demo CRON[8649]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T10:29:11.628021+00:00 srv-demo sshd[4016]: Accepted publickey for deploy from 10.0.0.5 port 51234 ssh2
+2026-10-09T10:39:07.310094+00:00 srv-demo sudo[8354]:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/systemctl restart app
+2026-10-09T10:51:08.972242+00:00 srv-demo sudo[8873]:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/systemctl restart app
+2026-10-09T11:07:01.786487+00:00 srv-demo CRON[7018]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T11:20:00.000000+00:00 srv-demo sshd[9783]: Failed password for invalid user test from 198.51.100.77 port 40000 ssh2
+2026-10-09T11:32:34.712397+00:00 srv-demo CRON[7635]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T11:47:23.032283+00:00 srv-demo sudo[7296]:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/systemctl restart app
+2026-10-09T11:50:00.000000+00:00 srv-demo sshd[1898]: Failed password for invalid user test from 198.51.100.77 port 40001 ssh2
+2026-10-09T12:13:07.739034+00:00 srv-demo sshd[5463]: Accepted publickey for deploy from 10.0.0.5 port 51234 ssh2
+2026-10-09T12:20:00.000000+00:00 srv-demo sshd[6038]: Failed password for invalid user test from 198.51.100.77 port 40002 ssh2
+2026-10-09T12:22:51.603021+00:00 srv-demo CRON[9379]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T12:25:52.706822+00:00 srv-demo sshd[9916]: Accepted publickey for deploy from 10.0.0.5 port 51234 ssh2
+2026-10-09T12:30:53.501090+00:00 srv-demo CRON[4961]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T12:37:34.610462+00:00 srv-demo sshd[2135]: Accepted publickey for deploy from 10.0.0.5 port 51234 ssh2
+2026-10-09T12:40:12.888049+00:00 srv-demo CRON[1787]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T12:48:48.903047+00:00 srv-demo sudo[7470]:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/systemctl restart app
+2026-10-09T13:08:29.620313+00:00 srv-demo CRON[5462]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T13:21:46.287141+00:00 srv-demo sshd[3196]: Accepted publickey for deploy from 10.0.0.5 port 51234 ssh2
+2026-10-09T13:23:32.421530+00:00 srv-demo CRON[8644]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T14:00:00.000000+00:00 srv-demo sshd[7768]: Failed password for root from 198.51.100.23 port 50000 ssh2
+2026-10-09T14:00:07.800000+00:00 srv-demo sshd[9465]: Failed password for root from 198.51.100.23 port 50001 ssh2
+2026-10-09T14:00:15.600000+00:00 srv-demo sshd[6083]: Failed password for root from 198.51.100.23 port 50002 ssh2
+2026-10-09T14:00:23.400000+00:00 srv-demo sshd[5172]: Failed password for root from 198.51.100.23 port 50003 ssh2
+2026-10-09T14:00:31.200000+00:00 srv-demo sshd[4246]: Failed password for root from 198.51.100.23 port 50004 ssh2
+2026-10-09T14:00:39.000000+00:00 srv-demo sshd[6047]: Failed password for root from 198.51.100.23 port 50005 ssh2
+2026-10-09T14:00:46.800000+00:00 srv-demo sshd[4810]: Failed password for root from 198.51.100.23 port 50006 ssh2
+2026-10-09T14:00:54.600000+00:00 srv-demo sshd[5251]: Failed password for root from 198.51.100.23 port 50007 ssh2
+2026-10-09T14:01:02.400000+00:00 srv-demo sshd[7384]: Failed password for root from 198.51.100.23 port 50008 ssh2
+2026-10-09T14:01:10.200000+00:00 srv-demo sshd[3044]: Failed password for root from 198.51.100.23 port 50009 ssh2
+2026-10-09T14:01:18.000000+00:00 srv-demo sshd[5815]: Failed password for root from 198.51.100.23 port 50010 ssh2
+2026-10-09T14:01:25.800000+00:00 srv-demo sshd[8391]: Failed password for root from 198.51.100.23 port 50011 ssh2
+2026-10-09T14:01:33.600000+00:00 srv-demo sshd[6080]: Failed password for root from 198.51.100.23 port 50012 ssh2
+2026-10-09T14:01:41.400000+00:00 srv-demo sshd[2088]: Failed password for root from 198.51.100.23 port 50013 ssh2
+2026-10-09T14:01:49.200000+00:00 srv-demo sshd[1052]: Failed password for root from 198.51.100.23 port 50014 ssh2
+2026-10-09T14:01:57.000000+00:00 srv-demo sshd[8408]: Failed password for root from 198.51.100.23 port 50015 ssh2
+2026-10-09T14:02:04.800000+00:00 srv-demo sshd[2538]: Failed password for root from 198.51.100.23 port 50016 ssh2
+2026-10-09T14:02:12.600000+00:00 srv-demo sshd[2100]: Failed password for root from 198.51.100.23 port 50017 ssh2
+2026-10-09T14:02:20.400000+00:00 srv-demo sshd[9708]: Failed password for root from 198.51.100.23 port 50018 ssh2
+2026-10-09T14:02:28.200000+00:00 srv-demo sshd[4392]: Failed password for root from 198.51.100.23 port 50019 ssh2
+2026-10-09T14:02:36.000000+00:00 srv-demo sshd[9188]: Failed password for root from 198.51.100.23 port 50020 ssh2
+2026-10-09T14:02:43.800000+00:00 srv-demo sshd[5245]: Failed password for root from 198.51.100.23 port 50021 ssh2
+2026-10-09T14:02:51.600000+00:00 srv-demo sshd[3070]: Failed password for root from 198.51.100.23 port 50022 ssh2
+2026-10-09T14:02:59.400000+00:00 srv-demo sshd[6618]: Failed password for root from 198.51.100.23 port 50023 ssh2
+2026-10-09T14:03:07.200000+00:00 srv-demo sshd[2027]: Failed password for root from 198.51.100.23 port 50024 ssh2
+2026-10-09T14:03:15.000000+00:00 srv-demo sshd[4902]: Failed password for root from 198.51.100.23 port 50025 ssh2
+2026-10-09T14:03:22.800000+00:00 srv-demo sshd[6954]: Failed password for root from 198.51.100.23 port 50026 ssh2
+2026-10-09T14:03:30.600000+00:00 srv-demo sshd[5569]: Failed password for root from 198.51.100.23 port 50027 ssh2
+2026-10-09T14:03:38.400000+00:00 srv-demo sshd[3484]: Failed password for root from 198.51.100.23 port 50028 ssh2
+2026-10-09T14:03:46.200000+00:00 srv-demo sshd[8079]: Failed password for root from 198.51.100.23 port 50029 ssh2
+2026-10-09T14:04:30.000000+00:00 srv-demo sshd[9800]: Accepted password for root from 198.51.100.23 port 50100 ssh2
+2026-10-09T14:06:00.000000+00:00 srv-demo useradd[5856]: new user: name=backup, UID=1002, GID=1002, home=/home/backup, shell=/bin/bash, from=/dev/pts/1
+2026-10-09T14:41:23.200019+00:00 srv-demo CRON[4410]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T14:44:01.123703+00:00 srv-demo CRON[2512]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T16:00:21.330391+00:00 srv-demo CRON[2690]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T16:04:29.891920+00:00 srv-demo CRON[4019]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T16:21:36.993063+00:00 srv-demo sshd[2428]: Accepted publickey for deploy from 10.0.0.5 port 51234 ssh2
+2026-10-09T16:35:46.874409+00:00 srv-demo CRON[2060]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+2026-10-09T17:01:27.943158+00:00 srv-demo sudo[3597]:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/systemctl restart app
+2026-10-09T17:15:49.211388+00:00 srv-demo sshd[4772]: Accepted publickey for deploy from 10.0.0.5 port 51234 ssh2
