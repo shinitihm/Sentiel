@@ -56,11 +56,23 @@ sentiel demo -m ollama/llama3.1:8b    # with AI triage
 cp sentiel.example.toml sentiel.toml  # then edit: model, sources, notifications
 sentiel scan                          # one pass over your real logs
 sentiel watch                         # keep monitoring
+sentiel doctor                        # check config, sources, model and notifications
 sentiel alerts / show 3 / report / chat "which IPs failed to log in most?"
 sentiel bench ollama/llama3.1:8b,anthropic/claude-sonnet-5-5
 ```
 
 Reading the Windows **Security** log requires an administrator shell; without it Sentiel says so and continues with the other sources.
+
+## Run as a service
+
+Run `sentiel doctor` first: it checks your config, database, rules, log sources, model and notifications before you leave it running.
+
+- **Linux:** `contrib/sentiel.service` is a systemd unit. The install steps are in its header comment. Start it with `sudo systemctl enable --now sentiel` and verify with the service's config: `sudo -u sentiel sh -c 'cd /var/lib/sentiel && sentiel doctor -c /etc/sentiel/sentiel.toml'`.
+- **Windows:** `contrib/sentiel-task.xml` is a Task Scheduler task that starts at boot as SYSTEM. Register it with `Register-ScheduledTask` from an elevated PowerShell (see the file's comment), then start it now with `Start-ScheduledTask -TaskName Sentiel` (the boot trigger waits for a reboot) and verify, still as administrator: `cd C:\ProgramData\Sentiel; sentiel doctor -c C:\ProgramData\Sentiel\sentiel.toml`.
+
+LLM provider keys (`ANTHROPIC_API_KEY` etc.) come only from the environment, which a service does not inherit from your shell: use `/etc/sentiel/env` on Linux and machine-level variables on Windows (see the files' comments).
+
+Every stage commits to SQLite before the next, so stopping the service never loses an alert.
 
 ## Security by design
 

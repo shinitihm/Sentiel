@@ -40,11 +40,23 @@ sentiel demo -m ollama/llama3.1:8b    # com triagem por IA
 cp sentiel.example.toml sentiel.toml  # depois edite: modelo, fontes, notificações
 sentiel scan                          # uma passada nos seus logs reais
 sentiel watch                         # monitoramento contínuo
+sentiel doctor                        # confere config, fontes, modelo e notificações
 sentiel alerts / show 3 / report / chat "quais IPs mais erraram login?"
 sentiel bench ollama/llama3.1:8b,anthropic/claude-sonnet-5-5
 ```
 
 Ler o log **Security** do Windows exige um terminal de administrador; sem ele o Sentiel avisa e continua com as outras fontes.
+
+## Rodar como serviço
+
+Rode `sentiel doctor` antes de tudo: ele confere config, banco, regras, fontes de log, modelo e notificações antes de você deixar rodando.
+
+- **Linux:** `contrib/sentiel.service` é uma unit do systemd. Os passos de instalação estão no comentário do cabeçalho. Inicie com `sudo systemctl enable --now sentiel` e confira com a config do serviço: `sudo -u sentiel sh -c 'cd /var/lib/sentiel && sentiel doctor -c /etc/sentiel/sentiel.toml'`.
+- **Windows:** `contrib/sentiel-task.xml` é uma tarefa do Agendador de Tarefas que inicia no boot como SYSTEM. Registre com `Register-ScheduledTask` em um PowerShell de administrador (veja o comentário do arquivo), inicie agora com `Start-ScheduledTask -TaskName Sentiel` (o gatilho de boot espera um reinício) e confira, ainda como administrador: `cd C:\ProgramData\Sentiel; sentiel doctor -c C:\ProgramData\Sentiel\sentiel.toml`.
+
+As chaves dos provedores de LLM (`ANTHROPIC_API_KEY` etc.) vêm só do ambiente, que um serviço não herda do seu terminal: use `/etc/sentiel/env` no Linux e variáveis de máquina no Windows (veja os comentários dos arquivos).
+
+Cada etapa grava no SQLite antes da próxima, então parar o serviço nunca perde um alerta.
 
 ## Segurança por design
 
