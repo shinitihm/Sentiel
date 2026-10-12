@@ -1,12 +1,15 @@
 import json
+import os
 import shutil
 import sqlite3
+import stat
 import tempfile
 import time
 import unicodedata
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import typer
 from rich.console import Console
@@ -16,7 +19,7 @@ from rich.table import Table
 
 from . import __version__, store
 from .collectors import read_json
-from .config import Config, describe_error, load_config
+from .config import Config, clean_text, describe_error, load_config
 from .detect import RULES_DIR, Correlation, detect, load_rules, rules_for
 from .models import RANK, effective_severity, is_contested
 from .notify import format_digest
@@ -36,11 +39,16 @@ NoAiOpt = Annotated[bool, typer.Option("--no-ai", help="Skip LLM triage (detecti
 COLORS = {"info": "dim", "low": "cyan", "medium": "yellow", "high": "red", "critical": "bold white on red"}
 
 
+def safe(text: object, *, keep_newlines: bool = False) -> str:
+    """Untrusted text (rule titles, notes, AI output, log data) for Rich: terminal controls out, markup escaped."""
+    return escape(clean_text(str(text), keep_newlines=keep_newlines))
+
+
 def _load_config(path: Path) -> Config:
     try:
         return load_config(path)
     except (ValueError, OSError) as e:  # ValidationError, TOMLDecodeError, UnicodeDecodeError are ValueErrors
-        console.print(f"[red]Invalid config:[/] {escape(describe_error(e))}")
+        console.print(f"[red]Invalid config:[/] {safe(describe_error(e))}")
         raise typer.Exit(2) from e
 
 
@@ -51,7 +59,7 @@ def _setup(config: Path, model: str | None) -> tuple[Config, sqlite3.Connection]
     try:
         return cfg, store.connect(cfg.db_path)
     except (store.SchemaTooNew, sqlite3.Error) as e:
-        console.print(f"[red]Database error:[/] {escape(str(e))}")
+        console.print(f"[red]Database error:[/] {safe(str(e))}")
         raise typer.Exit(1) from e
 
 
@@ -59,8 +67,8 @@ def _privacy_notice(conn: sqlite3.Connection, model: str) -> None:
     provider = model.split("/")[0]
     if is_local(model) or store.get_state(conn, f"cloud_ack:{provider}"):
         return
-    console.print(Panel(f"Model [bold]{escape(model)}[/] is not local: alert details (and chat results) are sent to "
-                        f"[bold]{escape(provider)}[/]. Use an [bold]ollama/...[/] model to keep logs on this machine.",
+    console.print(Panel(f"Model [bold]{safe(model)}[/] is not local: alert details (and chat results) are sent to "
+                        f"[bold]{safe(provider)}[/]. Use an [bold]ollama/...[/] model to keep logs on this machine.",
                         title="Privacy", border_style="yellow"))
     store.set_state(conn, f"cloud_ack:{provider}", "1")
 
@@ -80,8 +88,8 @@ def alerts_table(rows: list[sqlite3.Row], title: str = "Alerts") -> Table:
         else:
             verdict = triage.verdict.replace("_", " ")
         t.add_row(str(alert.id), alert.ts.strftime("%m-%d %H:%M"), f"[{COLORS[sev]}] {sev.upper()} [/]",
-                  escape(alert.status), escape(alert.rule_title), f"×{alert.count}" if alert.count > 1 else "",
-                  escape(", ".join(alert.mitre)), verdict)
+                  safe(alert.status), safe(alert.rule_title), f"×{alert.count}" if alert.count > 1 else "",
+                  safe(", ".join(alert.mitre)), verdict)
     return t
 
 
@@ -90,7 +98,7 @@ def _print_summary(s: ScanSummary) -> None:
                   f"[bold]{s.triaged}[/] triaged, [bold]{s.pending}[/] pending, [bold]{s.notified}[/] notified"
                   + (f", {s.skipped_lines} unreadable lines skipped" if s.skipped_lines else ""))
     for w in s.warnings:
-        console.print(f"[yellow]![/] {escape(w)}")
+        console.print(f"[yellow]![/] {safe(w)}")
 
 
 @app.command("scan")
@@ -109,7 +117,7 @@ def watch(config: ConfigOpt = Path("sentiel.toml"), model: ModelOpt = None, no_a
     cfg, conn = _setup(config, model)
     if not no_ai:
         _privacy_notice(conn, cfg.model)
-    console.print(f"Watching every {cfg.interval}s with [bold]{escape(cfg.model)}[/]. Ctrl+C to stop.")
+    console.print(f"Watching every {cfg.interval}s with [bold]{safe(cfg.model)}[/]. Ctrl+C to stop.")
     try:
         while True:
             last = conn.execute("SELECT coalesce(max(id), 0) FROM alerts").fetchone()[0]
@@ -120,7 +128,7 @@ def watch(config: ConfigOpt = Path("sentiel.toml"), model: ModelOpt = None, no_a
                 if new:
                     console.print(alerts_table(new, "New alerts"))
             except Exception as e:  # keep the loop alive: one bad cycle must not stop monitoring
-                console.print(f"[red]Cycle failed:[/] {escape(str(e))}")
+                console.print(f"[red]Cycle failed:[/] {safe(str(e))}")
             time.sleep(cfg.interval)
     except KeyboardInterrupt:
         console.print("\nStopped.")
@@ -132,7 +140,8 @@ def digest(config: ConfigOpt = Path("sentiel.toml")) -> None:
     cfg, conn = _setup(config, None)
     delivered = send_digest(conn, cfg)
     if not delivered:
-        console.print(escape(format_digest(store.digest_stats(conn, datetime.now(UTC) - timedelta(hours=24)))))
+        console.print(safe(format_digest(store.digest_stats(conn, datetime.now(UTC) - timedelta(hours=24))),
+                           keep_newlines=True))
     elif not any(delivered.values()):
         console.print("[red]Digest delivery failed on every channel.[/]")
         raise typer.Exit(1)
@@ -152,7 +161,7 @@ def alerts(config: ConfigOpt = Path("sentiel.toml"), limit: int = 30,
 @app.command("set")
 def set_cmd(alert_id: int, status: str, note: Annotated[str | None, typer.Option("--note", help="Free text")] = None,
             suppress: Annotated[str | None, typer.Option(
-                "--suppress", help="With false_positive: print a [[suppress]] block for this event field")] = None,
+                "--suppress", help="With false_positive: print a \\[\\[suppress]] block for this event field")] = None,
             config: ConfigOpt = Path("sentiel.toml")) -> None:
     """Set an alert's status: open, ack, closed or false_positive."""
     valid = tuple(s for s in store.STATUSES if s != "suppressed")  # suppressed only comes from the config file
@@ -176,9 +185,9 @@ def set_cmd(alert_id: int, status: str, note: Annotated[str | None, typer.Option
     try:
         store.set_status(conn, alert_id, status, note)
     except sqlite3.OperationalError as e:  # e.g. "database is locked" by another process
-        console.print(f"[red]Database error:[/] {escape(str(e))}")
+        console.print(f"[red]Database error:[/] {safe(str(e))}")
         raise typer.Exit(1) from e
-    console.print(f"Alert {alert_id} -> [bold]{escape(status)}[/]")
+    console.print(f"Alert {alert_id} -> [bold]{safe(status)}[/]")
     if snippet:
         console.print("Paste this into your config to suppress it from now on (nothing was edited):")
         console.print(snippet, markup=False, highlight=False, soft_wrap=True)
@@ -205,23 +214,24 @@ def show(alert_id: int, config: ConfigOpt = Path("sentiel.toml")) -> None:
         raise typer.BadParameter(f"no alert with id {alert_id}")
     alert, triage = store.row_to_alert(row)
     sev = effective_severity(alert.sigma_level, triage)
-    lines = [f"[bold]{escape(alert.rule_title)}[/]  [{COLORS[sev]}] {sev.upper()} [/]  rule level: {alert.sigma_level}",
-             f"MITRE (rule): {escape(', '.join(alert.mitre)) or '-'}   matching events: {len(alert.event_ids)}",
-             f"Status: {escape(alert.status)}   count: {alert.count}   last seen: {alert.last_ts:%Y-%m-%d %H:%M} UTC"]
+    lines = [f"[bold]{safe(alert.rule_title)}[/]  [{COLORS[sev]}] {sev.upper()} [/]  rule level: {alert.sigma_level}",
+             f"MITRE (rule): {safe(', '.join(alert.mitre)) or '-'}   matching events: {len(alert.event_ids)}",
+             f"Status: {safe(alert.status)}   count: {alert.count}   last seen: {alert.last_ts:%Y-%m-%d %H:%M} UTC"]
     if alert.note:
-        lines.append(f"Note: {escape(alert.note)}")
+        lines.append(f"Note: {safe(alert.note)}")
     if triage:
         if is_contested(alert.sigma_level, triage):
             lines.append("[bold red]CONTESTED:[/] the AI called this benign, but the detection rule rates it "
                          f"{alert.sigma_level}. Severity stays {sev}. Verify manually.")
-        lines += ["", f"[bold]AI ({escape(row['model'] or '?')}):[/] {triage.verdict}, severity {triage.severity}",
-                  escape(triage.summary), "", "[bold]Next steps[/]", *[f" - {escape(s)}" for s in triage.next_steps],
-                  f"MITRE (AI): {escape(', '.join(triage.mitre_techniques)) or '-'}"]
+        lines += ["", f"[bold]AI ({safe(row['model'] or '?')}):[/] {triage.verdict}, severity {triage.severity}",
+                  safe(triage.summary, keep_newlines=True), "", "[bold]Next steps[/]",
+                  *[f" - {safe(s, keep_newlines=True)}" for s in triage.next_steps],
+                  f"MITRE (AI): {safe(', '.join(triage.mitre_techniques)) or '-'}"]
     else:
         lines.append("\n[dim]Not triaged yet. Run `sentiel triage`.[/]")
     console.print(Panel("\n".join(lines), title=f"Alert {alert.id}"))
     for e in store.get_events(conn, alert.event_ids[:3]):
-        console.print_json(json.dumps(e["fields"], default=str))
+        console.print_json(json.dumps(e["fields"], default=str), ensure_ascii=True)
 
 
 @app.command()
@@ -259,7 +269,7 @@ def report(config: ConfigOpt = Path("sentiel.toml")) -> None:
     top.add_column("Rule")
     top.add_column("Alerts", justify="right")
     for title, n in sorted(by_rule.items(), key=lambda kv: -kv[1])[:5]:
-        top.add_row(escape(title), str(n))
+        top.add_row(safe(title), str(n))
     console.print(top)
     fp = Table(title="False-positive rate by rule")
     fp.add_column("Rule")
@@ -274,7 +284,7 @@ def report(config: ConfigOpt = Path("sentiel.toml")) -> None:
         st[0] += 1
         st[1] += row["status"] == "false_positive"
     for rid, (n, bad) in sorted(stats.items(), key=lambda kv: -kv[1][0])[:10]:  # ponytail: top 10 rules only
-        fp.add_row(escape(titles[rid]), str(n), str(bad), f"{round(100 * bad / n)}%")
+        fp.add_row(safe(titles[rid]), str(n), str(bad), f"{round(100 * bad / n)}%")
     console.print(fp)
     console.print(f"Suppressed: {sum(1 for r in rows if r['status'] == 'suppressed')}")
     cost = conn.execute("SELECT coalesce(sum(cost_usd), 0) FROM alerts").fetchone()[0]
@@ -290,39 +300,89 @@ def demo(model: ModelOpt = None, no_ai: NoAiOpt = False, config: ConfigOpt = Pat
         cfg.model = model
     with tempfile.TemporaryDirectory() as tmp:
         conn = store.connect(Path(tmp) / "demo.db")
-        console.print(f"Simulated attacks on a Windows desktop and a Linux server. "
-                      f"AI: {'off' if no_ai else '[bold]' + escape(cfg.model) + '[/]'}")
-        _print_summary(run_scan(conn, cfg, ai=not no_ai))
-        console.print(alerts_table(store.list_alerts(conn, 50), "Detected attacks"))
-        if no_ai:
-            console.print("\nRe-run without --no-ai (e.g. `ollama pull llama3.1:8b`) to see AI triage.")
-        conn.close()
+        try:
+            console.print(f"Simulated attacks on a Windows desktop and a Linux server. "
+                          f"AI: {'off' if no_ai else '[bold]' + safe(cfg.model) + '[/]'}")
+            _print_summary(run_scan(conn, cfg, ai=not no_ai))
+            console.print(alerts_table(store.list_alerts(conn, 50), "Detected attacks"))
+            if no_ai:
+                console.print("\nRe-run without --no-ai (e.g. `ollama pull llama3.1:8b`) to see AI triage.")
+        finally:
+            conn.close()  # an open DB file blocks temp dir cleanup on Windows
 
 
 @app.command()
 def bench(models: Annotated[str, typer.Argument(help="Comma-separated LiteLLM models")],
-          out: Path = Path("bench.md"), config: ConfigOpt = Path("sentiel.toml")) -> None:
+          out: Path = Path("bench.md"),
+          readme: Annotated[bool, typer.Option("--readme", help="Also update the table between the BENCH markers "
+                                               "in a README (README.md, or the file given by --readme-file)")] = False,
+          readme_file: Annotated[Path, typer.Option(help="README used by --readme")] = Path("README.md"),
+          config: ConfigOpt = Path("sentiel.toml")) -> None:
     """Compare models on the demo attacks: severity, MITRE recall, JSON validity, injection resistance, cost."""
-    from .bench import run_bench, to_markdown
+    from .bench import run_bench, splice_readme, to_markdown
 
     model_list = [m.strip() for m in models.split(",") if m.strip()]
     if not model_list:
         raise typer.BadParameter("no models given")
+    if readme:  # fail before spending any LLM call
+        if out.resolve() == readme_file.resolve():
+            console.print("[red]--out and --readme-file are the same file;[/] pick different paths.")
+            raise typer.Exit(1)
+        try:
+            splice_readme(readme_file.read_bytes().decode("utf-8"), "")
+        except (OSError, ValueError) as e:  # UnicodeDecodeError is a ValueError
+            _readme_failed(readme_file, e)
     cfg = _load_config(config)
     with tempfile.TemporaryDirectory() as tmp:
         conn = store.connect(Path(tmp) / "bench.db")
-        scores = run_bench(model_list, cfg, conn)
-        conn.close()
+        try:  # --out is rewritten after every model, so a crash in a later one keeps the earlier results
+            scores = run_bench(model_list, cfg, conn, on_score=lambda done: out.write_text(to_markdown(done),
+                                                                                         encoding="utf-8"))
+        finally:
+            conn.close()
     t = Table(title="Model benchmark (demo attacks)")
     rows = [s.row for s in scores]
     cols = list(next((r for r in rows if len(r) > 2), rows[0]))
     for c in cols:
         t.add_column(c)
     for r in rows:
-        t.add_row(*[escape(r.get(c, "")) for c in cols])
+        t.add_row(*[safe(r.get(c, "")) for c in cols])
     console.print(t)
-    out.write_text(to_markdown(scores), encoding="utf-8")
-    console.print(f"Markdown table written to {out}")
+    table_md = to_markdown(scores)
+    out.write_text(table_md, encoding="utf-8")
+    console.print(f"Markdown table written to {safe(out)}")
+    if readme:
+        try:
+            _write_atomic(readme_file, splice_readme(readme_file.read_bytes().decode("utf-8"), table_md))
+        except (OSError, ValueError) as e:  # UnicodeDecodeError is a ValueError
+            _readme_failed(readme_file, e)
+        console.print(f"README table updated in {safe(readme_file)}")
+
+
+def _readme_failed(readme_file: Path, e: Exception) -> NoReturn:
+    console.print(f"[red]Could not update {safe(str(readme_file))}:[/] {safe(type(e).__name__)}: "
+                  f"{safe(str(e)[:150])}")
+    raise typer.Exit(1) from e
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    """Write text (UTF-8, newlines untouched) via a temp file in the same folder + os.replace."""
+    fd, tmp = tempfile.mkstemp(dir=path.resolve().parent, prefix=".sentiel-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(text.encode("utf-8"))
+        try:
+            shutil.copymode(path, tmp)  # mkstemp makes it 0600; keep the README's own mode
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.chmod(tmp, stat.S_IWRITE | stat.S_IREAD)  # copymode may have left it read-only (Windows)
+        except OSError:
+            pass
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 @app.command()
@@ -338,10 +398,10 @@ def chat(question: Annotated[str, typer.Argument(help="Question about your logs"
     try:
         res = ask(cfg.db_path, question, cfg.model, timeout=cfg.llm_timeout)
     except LLMUnavailable as e:
-        console.print(f"[red]Model unavailable:[/] {escape(str(e))}")
+        console.print(f"[red]Model unavailable:[/] {safe(str(e))}")
         raise typer.Exit(1) from e
-    console.print(Panel(escape(res.sql), title="SQL (read-only)", border_style="dim"))
-    console.print(escape(res.answer))
+    console.print(Panel(safe(res.sql, keep_newlines=True), title="SQL (read-only)", border_style="dim"))
+    console.print(safe(res.answer, keep_newlines=True))
 
 
 @app.command()
@@ -362,7 +422,7 @@ def doctor(config: ConfigOpt = Path("sentiel.toml"), model: ModelOpt = None, no_
         table.add_column(col)
     for c in checks:
         status = "[green]OK[/]" if c.ok else ("[red]FAIL[/]" if c.critical else "[yellow]WARN[/]")
-        table.add_row(escape(c.name), status, escape(c.detail))
+        table.add_row(safe(c.name), status, safe(c.detail))
     console.print(table)
     if any(c.critical and not c.ok for c in checks):
         raise typer.Exit(1)
@@ -381,13 +441,13 @@ def rules_list(config: ConfigOpt = Path("sentiel.toml"),
     for r in rules:
         origin = Path(r.origin).resolve()
         where = "builtin" if origin.is_relative_to(builtin) else str(r.origin)
-        t.add_row(escape(r.id), escape(r.title), r.level, "correlation" if isinstance(r, Correlation) else "sigma",
-                  escape(where))
+        t.add_row(safe(r.id), safe(r.title), r.level, "correlation" if isinstance(r, Correlation) else "sigma",
+                  safe(where))
     console.print(t)
     console.print(f"{len(rules)} rules loaded, {len(warnings)} warnings")
     if skipped:
         for w in warnings:
-            console.print(f"[yellow]![/] {escape(w)}")
+            console.print(f"[yellow]![/] {safe(w)}")
 
 
 @rules_app.command("test")
@@ -401,18 +461,21 @@ def rules_test(rule_file: Annotated[Path, typer.Argument(exists=True, dir_okay=F
         shutil.copy(rule_file, rules_dir / rule_file.name)
         rules, warnings = load_rules(rules_dir)
         if not rules:
-            console.print(f"[red]No rules loaded from[/] {escape(str(rule_file))}")
+            console.print(f"[red]No rules loaded from[/] {safe(str(rule_file))}")
             for w in warnings:
-                console.print(f"[yellow]![/] {escape(w)}")
+                console.print(f"[yellow]![/] {safe(w)}")
             raise typer.Exit(1)
         conn = store.connect(Path(tmp) / "test.db")
         try:
-            store.insert_events(conn, read_json(events_jsonl))
+            stats: Counter = Counter()
+            store.insert_events(conn, read_json(events_jsonl, stats))
             found = detect(conn, rules, 0, warnings)
         finally:
             conn.close()  # an open DB file blocks temp dir cleanup on Windows
     for w in warnings:
-        console.print(f"[yellow]![/] {escape(w)}")
+        console.print(f"[yellow]![/] {safe(w)}")
+    if stats["skipped"]:
+        console.print(f"[yellow]![/] {stats['skipped']} lines skipped (not valid JSON objects)")
     if not found:
         console.print("No match. Events must use the source the rule expects (logsource.product); "
                       "generic JSON lines are source=json.")
@@ -421,7 +484,7 @@ def rules_test(rule_file: Annotated[Path, typer.Argument(exists=True, dir_okay=F
     for col in ("Rule", "First event (UTC)", "Events"):
         t.add_column(col)
     for a in found:
-        t.add_row(escape(a.rule_title), a.ts.strftime("%Y-%m-%d %H:%M:%S"), str(len(a.event_ids)))
+        t.add_row(safe(a.rule_title), a.ts.strftime("%Y-%m-%d %H:%M:%S"), str(len(a.event_ids)))
     console.print(t)
 
 
