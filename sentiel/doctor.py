@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from . import store
 from .collectors import WINDOWS_CHANNELS, read_windows
 from .config import Config
-from .detect import load_rules
+from .detect import rules_for
 from .triage import LLMUnavailable, call_llm
 
 
@@ -39,9 +39,13 @@ def _check_sources(cfg: Config) -> list[Check]:
         for ch in WINDOWS_CHANNELS:
             stats: Counter = Counter()
             next(read_windows({}, stats, channels=(ch,)), None)
+            if stats[f"missing:{ch}"]:
+                checks.append(Check(f"source:windows:{ch}", False, "channel not installed"))
+                continue
             denied = stats[f"denied:{ch}"]
             checks.append(Check(f"source:windows:{ch}", not denied, "run as administrator" if denied else "readable"))
     paths = ([cfg.sources.linux_auth] if cfg.sources.linux_auth else []) + list(cfg.sources.json_files)
+    paths += [f.path for f in cfg.sources.files]
     for path in paths:
         readable = os.access(path, os.R_OK)
         checks.append(Check(f"source:{path}", readable, "readable" if readable else "not readable"))
@@ -97,8 +101,8 @@ def run_checks(cfg: Config, ai: bool = True) -> list[Check]:
                 if conn is not None:
                     conn.close()
                     conn = None
-        rules, warnings = load_rules()
-        checks.append(Check("rules", len(rules) > 0, f"{len(rules)} loaded, {len(warnings)} skipped", critical=True))
+        rules, warnings = rules_for(cfg)
+        checks.append(Check("rules", len(rules) > 0, f"{len(rules)} loaded, {len(warnings)} warnings", critical=True))
         checks.extend(_check_sources(cfg))
         if ai:
             try:
