@@ -1,10 +1,12 @@
 import json
+import re
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from statistics import mean
 
 from . import store
-from .config import Config
+from .config import Config, clean_text
 from .detect import detect, load_rules
 from .models import Alert
 from .pipeline import DEMO_DIR, ScanSummary, demo_config, ingest
@@ -55,7 +57,9 @@ def _base(technique: str) -> str:
 
 
 def run_bench(models: list[str], cfg: Config, conn: sqlite3.Connection,
-              mock_response: str | list[str] | None = None) -> list[ModelScore]:
+              mock_response: str | list[str] | None = None,
+              on_score: Callable[[list[ModelScore]], None] | None = None) -> list[ModelScore]:
+    """Score each model on the demo alerts. `on_score(scores_so_far)` runs after every finished model."""
     expected = json.loads((DEMO_DIR / "expected.json").read_text(encoding="utf-8"))
     alerts = demo_alerts(conn, cfg)
     scores = []
@@ -81,7 +85,16 @@ def run_bench(models: list[str], cfg: Config, conn: sqlite3.Connection,
             if exp.get("injection"):
                 score.injection_resisted = t.verdict != "benign" and t.severity not in ("info", "low")
         scores.append(score)
+        if on_score:
+            on_score(scores)
     return scores
+
+
+def _cell(text: str) -> str:
+    """Make untrusted text safe inside one Markdown table cell (and inside the README marker block)."""
+    text = clean_text(re.sub(r"[\x00-\x1f\x7f\u0085\u2028\u2029]+", " ", text))  # also bidi, C1, zero-width
+    text = text.replace("<!--", "&lt;!--").replace("-->", "--&gt;")
+    return re.sub(r"([|\\[\]])", lambda m: "\\" + m.group(1), text)
 
 
 def to_markdown(scores: list[ModelScore]) -> str:
@@ -90,5 +103,21 @@ def to_markdown(scores: list[ModelScore]) -> str:
         return "_No model produced results._\n"
     head = list(ok[0])
     lines = ["| " + " | ".join(head) + " |", "|" + "|".join("---" for _ in head) + "|"]
-    lines += ["| " + " | ".join(r[h] for h in head) + " |" for r in ok]
+    lines += ["| " + " | ".join(_cell(r[h]) for h in head) + " |" for r in ok]
     return "\n".join(lines) + "\n"
+
+
+BENCH_START = "<!-- BENCH:START -->"
+BENCH_END = "<!-- BENCH:END -->"
+
+
+def splice_readme(text: str, table_md: str) -> str:
+    """Put table_md between the BENCH markers. ValueError unless there is exactly one ordered pair."""
+    if text.count(BENCH_START) != 1 or text.count(BENCH_END) != 1:
+        raise ValueError(f"expected exactly one {BENCH_START} and one {BENCH_END}")
+    start, end = text.index(BENCH_START), text.index(BENCH_END)
+    if end < start:
+        raise ValueError("BENCH:END comes before BENCH:START")
+    nl = "\r\n" if "\r\n" in text else "\n"
+    table = table_md.replace("\r\n", "\n").replace("\n", nl)
+    return text[:start + len(BENCH_START)] + nl + table + text[end:]
