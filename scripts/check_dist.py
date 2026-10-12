@@ -19,7 +19,7 @@ MIN_RULES = 8
 
 def source_version() -> str:
     text = (ROOT / "sentiel" / "__init__.py").read_text(encoding="utf-8")
-    match = re.search(r'^__version__\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', text, re.MULTILINE)
     return match.group(1) if match else ""
 
 
@@ -52,6 +52,8 @@ def _version_of(raw: bytes) -> str:
 def check_dir(dist_dir: Path) -> list[str]:
     problems = []
     expected = source_version()
+    if not expected:
+        return ["could not read __version__ from sentiel/__init__.py"]
     archives = sorted(dist_dir.glob("*.tar.gz")) + sorted(dist_dir.glob("*.whl"))
     if not archives:
         return [f"no *.tar.gz or *.whl in {dist_dir}"]
