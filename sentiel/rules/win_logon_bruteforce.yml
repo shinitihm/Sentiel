@@ -1,0 +1,30 @@
+title: Windows failed logon
+id: 8f2c5e1a-3b7d-4c9e-a1f0-6d2b4e8c7a01
+name: sentiel_win_failed_logon
+status: test
+logsource:
+    product: windows
+    service: security
+detection:
+    selection:
+        EventID: 4625
+    condition: selection
+level: informational
+---
+title: Windows logon brute force (>=10 failures in 5 min)
+id: 8f2c5e1a-3b7d-4c9e-a1f0-6d2b4e8c7a03
+name: sentiel-bruteforce-windows
+status: test
+correlation:
+    type: event_count
+    rules:
+        - sentiel_win_failed_logon
+    group-by:
+        - IpAddress
+    timespan: 5m
+    condition:
+        gte: 10
+level: high
+tags:
+    - attack.credential-access
+    - attack.t1110.001

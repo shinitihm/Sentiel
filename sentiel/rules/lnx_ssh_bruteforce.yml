@@ -1,0 +1,30 @@
+title: SSH failed login
+id: 8f2c5e1a-3b7d-4c9e-a1f0-6d2b4e8c7a02
+name: sentiel_lnx_ssh_failed
+status: test
+logsource:
+    product: linux
+    service: auth
+detection:
+    selection:
+        event: ssh_failed
+    condition: selection
+level: informational
+---
+title: SSH brute force (>=10 failures in 5 min)
+id: 8f2c5e1a-3b7d-4c9e-a1f0-6d2b4e8c7a04
+name: sentiel-bruteforce-ssh
+status: test
+correlation:
+    type: event_count
+    rules:
+        - sentiel_lnx_ssh_failed
+    group-by:
+        - IpAddress
+    timespan: 5m
+    condition:
+        gte: 10
+level: high
+tags:
+    - attack.credential-access
+    - attack.t1110.001
