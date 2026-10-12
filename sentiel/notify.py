@@ -13,6 +13,19 @@ def format_message(alert: Alert, triage: Triage | None, severity: Severity, host
     return "\n".join(lines)[:1900]
 
 
+def format_digest(stats: dict, hours: int = 24) -> str:
+    """Counts and rule titles only; never raw log content."""
+    sev = ", ".join(f"{k}: {v}" for k, v in stats["by_severity"].items()) or "no alerts"
+    lines = [f"Sentiel digest, last {hours}h", f"Alerts by severity: {sev}",
+             f"Contested (AI says benign, rule says high): {stats['contested']}",
+             f"Pending triage: {stats['pending']}", f"Suppressed events: {stats['suppressed']}"]
+    if stats["top_rules"]:
+        lines.append("Top rules:")
+        # ponytail: titles come from rule files (not logs) but are cut and flattened anyway
+        lines += [f"- {' '.join(title.split())[:80]} ({n})" for title, n in stats["top_rules"]]
+    return "\n".join(lines)[:1900]
+
+
 def send(cfg: dict[str, str], text: str, client: httpx.Client | None = None) -> dict[str, bool]:
     """Channel name ("telegram", "discord") -> delivered; an empty dict means nothing is configured.
     Errors are swallowed on purpose: httpx messages contain the Telegram bot token in the URL."""
