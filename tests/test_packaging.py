@@ -89,7 +89,8 @@ def _tar_with(path, specs):
 
 def test_check_dir_flags_unsafe_tar_members(tmp_path):
     mod = load_check_dist()
-    _tar_with(tmp_path / "s-0.tar.gz", [("s-0/PKG-INFO", "file"), ("/etc/x", "file"), ("../../evil", "file"), ("s-0/l", "symlink")])
+    specs = [("s-0/PKG-INFO", "file"), ("/etc/x", "file"), ("../../evil", "file"), ("s-0/l", "symlink")]
+    _tar_with(tmp_path / "s-0.tar.gz", specs)
     problems = "\n".join(mod.check_dir(tmp_path))
     assert "/etc/x" in problems
     assert "../../evil" in problems
