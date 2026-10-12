@@ -1,88 +1,133 @@
 # Sentiel
 
-**Um SOC pessoal com triagem por IA que funciona com qualquer LLM.**
-Detecção baseada em Sigma na sua própria máquina, um modelo de linguagem para explicar e priorizar o que foi encontrado, e um design que não deixa esse modelo ser convencido a esconder um alerta.
+![GitHub repo size](https://img.shields.io/github/repo-size/shinitihm/Sentiel?style=for-the-badge)
+![GitHub language count](https://img.shields.io/github/languages/count/shinitihm/Sentiel?style=for-the-badge)
+![GitHub forks](https://img.shields.io/github/forks/shinitihm/Sentiel?style=for-the-badge)
+![GitHub open issues](https://img.shields.io/github/issues/shinitihm/Sentiel?style=for-the-badge)
+![GitHub open pull requests](https://img.shields.io/github/issues-pr/shinitihm/Sentiel?style=for-the-badge)
+![Python](https://img.shields.io/badge/python-%E2%89%A53.11-blue?style=for-the-badge)
+![License](https://img.shields.io/github/license/shinitihm/Sentiel?style=for-the-badge)
 
 [English](README.md)
 
+> SOC pessoal com triagem por IA que funciona com qualquer LLM. Regras Sigma detectam ataques nos seus próprios logs, e um modelo de linguagem explica e prioriza cada alerta. O modelo nunca decide quais alertas existem e não consegue rebaixar um alerta.
+
+### Ajustes e melhorias
+
+O projeto ainda está em desenvolvimento, e as próximas versões seguem este roadmap:
+
+- [x] v0.1.1: reparo da CLI (`demo`, `bench`, `chat`, `version`) e datas do `auth.log` na virada de ano
+- [x] v0.2: orquestração (backoff do LLM, triagem concorrente, `sentiel doctor`, heartbeat, serviços systemd e Agendador de Tarefas)
+- [x] v0.3: extensão por dados (regras próprias com `rules_dirs`/`disabled_rules`, correlações Sigma, fontes regex, `sentiel rules list/test`)
+- [x] v0.4: migrações de banco, status e nota em alertas (`sentiel set`), supressões, agrupamento e digest diário
+- [ ] v1.0: publicação no PyPI, CONTRIBUTING, SECURITY, CHANGELOG e CI com Python 3.14
+
+## 💻 Pré-requisitos
+
+Antes de começar, verifique se você atende aos seguintes requisitos:
+
+- Python **3.11 ou superior**.
+- Windows, Linux ou macOS. No Windows, ler o log **Security** exige um terminal de administrador. Sem ele, o Sentiel avisa e continua com as outras fontes.
+- Opcional, para triagem por IA: o [Ollama](https://ollama.com) com um modelo local, ou a chave de API de qualquer provedor suportado pelo [LiteLLM](https://github.com/BerriAI/litellm) (Anthropic, OpenAI, Gemini e mais de 100 outros).
+
+## 🚀 Instalando o Sentiel
+
+Para instalar o Sentiel, siga estas etapas:
+
+Linux e macOS:
+
 ```
-pip install .
-sentiel demo --no-ai                      # 7 ataques simulados, sem modelo
-sentiel demo -m ollama/llama3.1:8b        # o mesmo, com triagem por IA local
-```
-
-## O que faz
-
-- **Coleta** Windows Event Log (Security, System, Sysmon), `auth.log` do Linux e JSON Lines genérico.
-- **Detecta** com regras [Sigma](https://github.com/SigmaHQ/sigma) reais, convertidas para SQL pelo pySigma e executadas no SQLite, mais regras de limite (brute force) que Sigma-para-SQL não consegue expressar.
-- **Faz a triagem** de cada alerta com um LLM: severidade, veredito, técnicas MITRE ATT&CK, resumo em linguagem simples e próximos passos, em JSON validado.
-- **Funciona com qualquer modelo** via [LiteLLM](https://github.com/BerriAI/litellm): `ollama/...` (local), `anthropic/...`, `openai/...`, `gemini/...` e mais de 100 outros. Trocar de modelo é uma linha no `sentiel.toml`.
-- **Enriquece** IPs públicos (GeoIP, AbuseIPDB, VirusTotal) com cache de 24h. Opcional.
-- **Notifica** alertas de severidade alta por Telegram e Discord.
-- **Conversa** com seus logs: pergunte em linguagem natural e o modelo escreve uma consulta SQL somente leitura.
-- **Compara modelos** no conjunto de ataques embutido (`sentiel bench`).
-
-## Arquitetura
-
-Um pipeline linear de funções, sem agentes, filas ou sistema de plugins: a detecção é determinística e o modelo apenas interpreta os alertas, nunca decide quais existem. O diagrama está no [README em inglês](README.md#architecture).
-
-## Início rápido
-
-```bash
 git clone https://github.com/shinitihm/Sentiel && cd Sentiel
-python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
+python -m venv .venv && source .venv/bin/activate
 pip install .
+```
 
-sentiel demo --no-ai                  # só detecção, funciona offline
-ollama pull llama3.1:8b
-sentiel demo -m ollama/llama3.1:8b    # com triagem por IA
+Windows:
 
-cp sentiel.example.toml sentiel.toml  # depois edite: modelo, fontes, notificações
-sentiel scan                          # uma passada nos seus logs reais
+```
+git clone https://github.com/shinitihm/Sentiel; cd Sentiel
+python -m venv .venv; .venv\Scripts\activate
+pip install .
+```
+
+## ☕ Usando o Sentiel
+
+Para usar o Sentiel, siga estas etapas:
+
+```
+sentiel demo --no-ai                  # 7 ataques simulados, só detecção, offline
+sentiel demo -m ollama/llama3.1:8b    # o mesmo, com triagem por IA local
+
+cp sentiel.example.toml sentiel.toml  # edite modelo, fontes e notificações
+sentiel doctor                        # confere config, banco, regras, fontes, modelo e notificações
+sentiel scan                          # uma passada nos seus logs
 sentiel watch                         # monitoramento contínuo
-sentiel doctor                        # confere config, fontes, modelo e notificações
-sentiel alerts / show 3 / report / chat "quais IPs mais erraram login?"
+sentiel alerts / show 3 / report      # consultar alertas (open e ack; `alerts --all` mostra o resto)
+sentiel set 3 ack --note "analisando" # open | ack | closed | false_positive
+sentiel digest                        # resumo das últimas 24 h, enviado agora
+sentiel chat "quais IPs mais erraram login?"
+sentiel rules list --skipped          # regras carregadas e avisos
+sentiel rules test minha_regra.yml eventos.jsonl
 sentiel bench ollama/llama3.1:8b,anthropic/claude-sonnet-5-5
 ```
 
-Ler o log **Security** do Windows exige um terminal de administrador; sem ele o Sentiel avisa e continua com as outras fontes.
+Para rodar como serviço, use `contrib/sentiel.service` no Linux (systemd) ou `contrib/sentiel-task.xml` no Windows (Agendador de Tarefas). Os passos estão no cabeçalho de cada arquivo. As chaves dos provedores de LLM vêm só do ambiente: use `/etc/sentiel/env` no Linux e variáveis de máquina no Windows.
 
-## Rodar como serviço
+### Estendendo o Sentiel
 
-Rode `sentiel doctor` antes de tudo: ele confere config, banco, regras, fontes de log, modelo e notificações antes de você deixar rodando.
+- **Suas regras:** `rules_dirs = ["~/.sentiel/rules"]` carrega regras Sigma extras. Para um clone do SigmaHQ, aponte para a pasta `rules/` dele. `disabled_rules` desliga regras. Regras que não convertem, ou que são de um produto que o Sentiel não coleta, são ignoradas com um único aviso resumido por ciclo (`sentiel rules list --skipped`).
+- **Correlação:** regras de correlação Sigma com `event_count`, `gte` e um único `group-by`. Veja `sentiel/rules/lnx_ssh_bruteforce.yml`.
+- **Qualquer log de texto:** `[[sources.files]]` com uma regex. Os grupos nomeados viram campos Sigma, e `ts` e `host` são grupos especiais. Mantenha a regex linear: as linhas de log são controladas por quem ataca, e o `re` do Python não tem timeout.
 
-- **Linux:** `contrib/sentiel.service` é uma unit do systemd. Os passos de instalação estão no comentário do cabeçalho. Inicie com `sudo systemctl enable --now sentiel` e confira com a config do serviço: `sudo -u sentiel sh -c 'cd /var/lib/sentiel && sentiel doctor -c /etc/sentiel/sentiel.toml'`.
-- **Windows:** `contrib/sentiel-task.xml` é uma tarefa do Agendador de Tarefas que inicia no boot como SYSTEM. Registre com `Register-ScheduledTask` em um PowerShell de administrador (veja o comentário do arquivo), inicie agora com `Start-ScheduledTask -TaskName Sentiel` (o gatilho de boot espera um reinício) e confira, ainda como administrador: `cd C:\ProgramData\Sentiel; sentiel doctor -c C:\ProgramData\Sentiel\sentiel.toml`.
+### Ciclo de vida dos alertas
 
-As chaves dos provedores de LLM (`ANTHROPIC_API_KEY` etc.) vêm só do ambiente, que um serviço não herda do seu terminal: use `/etc/sentiel/env` no Linux e variáveis de máquina no Windows (veja os comentários dos arquivos).
+- **Status e notas:** `sentiel set <id> <status> [--note TEXTO]` com `open`, `ack`, `closed` ou `false_positive` (nota de até 1000 caracteres). O status `suppressed` existe, mas só vem do arquivo de config. `sentiel alerts` lista `open` e `ack`; `--all` mostra também `closed`, `false_positive` e `suppressed`. Só pessoas mudam o status: o modelo nunca muda. Alertas fechados, falso positivo e suprimidos nunca são triados nem notificados.
+- **Supressões:** `sentiel set <id> false_positive --suppress CAMPO` imprime um bloco `[[suppress]]` (`rule_id`, `field`, `equals`, `reason`) para você colar na config. O Sentiel não edita a config por você, e o modelo nunca cria supressões. Só o **primeiro** evento do alerta é avaliado, então uma rajada correlacionada que abre com um evento suprimido fica toda suprimida. Veja `sentiel.example.toml`.
+- **Agrupamento:** `group_window` (padrão 3600 segundos, `0` desliga) junta repetições da mesma regra, host e grupo em um só alerta, cujo `count` cresce. Um alerta que já foi notificado **não** é notificado de novo ao crescer: o `count` aparece em `sentiel show` e no digest.
+- **Digest diário:** `digest_hour = 9` (hora local, 0-23) faz o `sentiel watch` enviar uma vez por dia um resumo das últimas 24 horas para os seus canais de notificação. `sentiel digest` envia agora, ou imprime quando não há canal. O digest tem contagens e títulos de regra, nunca log bruto. O digest usa o horário do evento (`last_ts`), então logs antigos ingeridos agora podem não aparecer nele.
+- **Atualização do banco:** o schema migra sozinho (`PRAGMA user_version`) ao abrir o banco, e seus alertas e logs são mantidos. Copie o `sentiel.db` antes de atualizar o Sentiel. Um banco mais novo que o Sentiel instalado é recusado com mensagem clara e não é alterado.
+- **Config inválida:** todos os comandos saem com código 2 e uma mensagem curta, sem traceback e sem ecoar o valor errado. Exceção: `sentiel doctor` sai com 1 e mostra FAIL na tabela.
 
-Cada etapa grava no SQLite antes da próxima, então parar o serviço nunca perde um alerta.
+### Segurança por design
 
-## Segurança por design
+- **Prompt injection não esconde alertas:** a severidade efetiva é `max(nível da regra, severidade da IA)`. Se a IA chamar de "benigno" uma regra `high`, o alerta aparece como **CONTESTED** e continua sendo notificado.
+- **Logs são dados, não instruções:** os eventos chegam ao modelo num bloco `<untrusted_log_data>`, e o modelo não tem ferramentas.
+- **Chat somente leitura:** o banco abre com `mode=ro`, um *authorizer* do SQLite só permite `SELECT` em `logs`/`alerts`, e as consultas têm limite de tempo e de linhas.
+- **Nenhum alerta se perde:** cada etapa grava no SQLite antes da próxima. Se o modelo estiver fora do ar, os alertas ficam pendentes e são retentados.
 
-Quem ataca controla o conteúdo dos logs, então os logs são uma superfície de ataque contra a própria IA.
+## 📫 Contribuindo para o Sentiel
 
-- **Prompt injection não esconde alertas.** A severidade efetiva é `max(nível da regra, severidade da IA)`: o modelo pode aumentar, nunca diminuir. Se a IA chamar de "benigno" uma regra `high`, o alerta aparece como **CONTESTED** e continua sendo notificado. O demo inclui uma linha de comando PowerShell que manda o modelo marcá-la como benigna, e um teste garante que ela continua visível.
-- **Logs são dados, não instruções.** Os eventos entram no prompt como JSON dentro de um bloco `<untrusted_log_data>` que o conteúdo do log não consegue fechar, com valores de tamanho limitado. O modelo da triagem não tem ferramentas: só devolve JSON.
-- **O chat é somente leitura em três camadas:** o arquivo SQLite abre com `mode=ro`, um *authorizer* do SQLite nega tudo menos `SELECT` em `logs`/`alerts` (então `PRAGMA`, `ATTACH`, escritas e a tabela `state` ficam bloqueados mesmo que o modelo peça) e as consultas têm limite de tempo e de linhas.
-- **Privacidade:** usar um modelo não local mostra um aviso único de que detalhes dos alertas saem da máquina. As notificações levam só título, severidade, host e resumo, nunca linhas brutas de log. Segredos ficam no `sentiel.toml` (ignorado pelo git) ou em variáveis de ambiente, e erros de notificação nunca exibem o token do Telegram.
-- **Nenhum alerta se perde:** cada etapa grava no SQLite antes da próxima. Se o modelo estiver fora do ar, os alertas ficam *pendentes* e `sentiel triage` tenta de novo depois.
+Para contribuir com o Sentiel, siga estas etapas:
 
-## Limitações
+1. Faça um fork deste repositório.
+2. Crie um branch: `git checkout -b <nome_branch>`.
+3. Faça suas alterações, rode `pip install -e ".[dev]"`, `pytest -q` e `ruff check .`, e confirme-as: `git commit -m '<mensagem_commit>'`.
+4. Envie para o seu fork: `git push origin <nome_branch>`.
+5. Abra o pull request.
 
-- O `pySigma-backend-sqlite` não suporta busca de texto livre nem agregações. Por isso muitas regras Sigma de Linux não se aplicam, e o brute force é implementado como regras de limite explícitas.
-- O conjunto de regras é pequeno e curado (6 regras Sigma + 2 de limite): suficiente para demonstrar o pipeline, não substitui um conjunto de detecção completo.
-- A qualidade da triagem depende do modelo; modelos locais pequenos podem precisar da segunda tentativa de JSON. É exatamente o que o `bench` mede.
-- A coleta do Windows só funciona no Windows; o demo roda em qualquer sistema.
+Você também pode consultar a documentação do GitHub sobre [como criar um pull request](https://help.github.com/en/github/collaborating-with-issues-and-pull-requests/creating-a-pull-request).
 
-## Desenvolvimento
+## 🤝 Colaboradores
 
-```bash
-pip install -e ".[dev]"
-pytest            # sem rede nem chave de API; o LLM é simulado
-ruff check .
-SENTIEL_TEST_MODEL=ollama/mistral:latest pytest -m llm   # teste opcional com modelo real
-python scripts/generate_demo.py   # regenera o dataset de demo determinístico
-```
+Agradecemos às seguintes pessoas que contribuíram para este projeto:
 
-Licença MIT.
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/shinitihm" title="shinitihm no GitHub">
+        <img src="https://github.com/shinitihm.png" width="100px;" alt="Foto de shinitihm no GitHub"/><br>
+        <sub>
+          <b>shinitihm</b>
+        </sub>
+      </a>
+    </td>
+  </tr>
+</table>
+
+## 😄 Seja um dos contribuidores
+
+Quer fazer parte desse projeto? Abra uma issue ou um pull request. O guia `CONTRIBUTING.md` chega na v1.0.
+
+## 📝 Licença
+
+Esse projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
