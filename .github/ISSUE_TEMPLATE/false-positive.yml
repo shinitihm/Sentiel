@@ -1,0 +1,47 @@
+name: False positive
+description: Report an alert that fired on harmless activity
+title: "[false-positive] "
+labels: ["false-positive"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste sensitive logs.** Remove tokens, webhooks, API keys, passwords, usernames, hostnames and IP addresses before sending anything. If you are unsure, describe the event instead of pasting it.
+  - type: input
+    id: rule
+    attributes:
+      label: Alert id and rule
+      description: The alert id and the rule title or id, as shown by `sentiel alerts`.
+      placeholder: "#3, Registry Run Key Persistence"
+    validations:
+      required: true
+  - type: input
+    id: field
+    attributes:
+      label: Field and value that matched
+      description: The event field and (redacted) value that made the rule fire.
+      placeholder: "TargetObject: ...\\CurrentVersion\\Run\\ExampleUpdater"
+    validations:
+      required: true
+  - type: textarea
+    id: show
+    attributes:
+      label: Output of `sentiel show`
+      description: The output of `sentiel show <id>` with all secrets and personal data removed.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is harmless
+      description: What the software or activity is, and how the rule could tell it apart.
+    validations:
+      required: true
+  - type: checkboxes
+    id: redacted
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed secrets and sensitive data from everything above.
+          required: true

@@ -1,0 +1,49 @@
+name: New rule
+description: Propose a new Sigma detection rule for Sentiel
+title: "[rule] "
+labels: ["rule"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a rule. Do not paste real logs with sensitive data: use made-up hosts, users and addresses.
+  - type: input
+    id: product
+    attributes:
+      label: Product
+      description: The Sigma `logsource.product` (`windows`, `linux`, or none for generic events) and the channel or file the events come from, for example Sysmon or auth.log.
+      placeholder: windows, Microsoft-Windows-Sysmon/Operational
+    validations:
+      required: true
+  - type: input
+    id: technique
+    attributes:
+      label: ATT&CK technique
+      description: The MITRE ATT&CK technique the rule detects.
+      placeholder: T1547.001
+    validations:
+      required: true
+  - type: textarea
+    id: rule
+    attributes:
+      label: Sigma rule (YAML)
+      description: The full rule file. The `id` must be a UUID.
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: events
+    attributes:
+      label: Test events (.jsonl)
+      description: A few events, one JSON object per line. For a rule without a product, `ts`, `host` and the fields at the top level; for `windows`/`linux` rules, `ts`, `source`, `host` and `fields`. Include one that should match and one that should not.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output of `sentiel rules test`
+      description: The output of `sentiel rules test rule.yml events.jsonl`.
+      render: text
+    validations:
+      required: true

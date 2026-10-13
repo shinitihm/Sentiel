@@ -8,7 +8,7 @@
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.11-blue?style=for-the-badge)
 ![License](https://img.shields.io/github/license/shinitihm/Sentiel?style=for-the-badge)
 
-[English](README.md)
+[English](https://github.com/shinitihm/Sentiel/blob/main/README.md)
 
 > SOC pessoal com triagem por IA que funciona com qualquer LLM. Regras Sigma detectam ataques nos seus próprios logs, e um modelo de linguagem explica e prioriza cada alerta. O modelo nunca decide quais alertas existem e não consegue rebaixar um alerta.
 
@@ -20,7 +20,9 @@ O projeto ainda está em desenvolvimento, e as próximas versões seguem este ro
 - [x] v0.2: orquestração (backoff do LLM, triagem concorrente, `sentiel doctor`, heartbeat, serviços systemd e Agendador de Tarefas)
 - [x] v0.3: extensão por dados (regras próprias com `rules_dirs`/`disabled_rules`, correlações Sigma, fontes regex, `sentiel rules list/test`)
 - [x] v0.4: migrações de banco, status e nota em alertas (`sentiel set`), supressões, agrupamento e digest diário
-- [ ] v1.0: publicação no PyPI, CONTRIBUTING, SECURITY, CHANGELOG e CI com Python 3.14
+- v1.0:
+  - [x] config estrita, [CONTRIBUTING](https://github.com/shinitihm/Sentiel/blob/main/CONTRIBUTING.md), [SECURITY](https://github.com/shinitihm/Sentiel/blob/main/SECURITY.md), [CHANGELOG](https://github.com/shinitihm/Sentiel/blob/main/CHANGELOG.md), `sentiel bench --readme`, workflow de release e CI com um job (informativo) de Python 3.14
+  - [x] release v1.0 (PyPI)
 
 ## 💻 Pré-requisitos
 
@@ -32,7 +34,15 @@ Antes de começar, verifique se você atende aos seguintes requisitos:
 
 ## 🚀 Instalando o Sentiel
 
-Para instalar o Sentiel, siga estas etapas:
+Instale com o [pipx](https://pipx.pypa.io):
+
+```
+pipx install sentiel
+sentiel doctor
+sentiel demo --no-ai
+```
+
+Para mexer no código, instale a partir do código-fonte:
 
 Linux e macOS:
 
@@ -58,7 +68,6 @@ Para usar o Sentiel, siga estas etapas:
 sentiel demo --no-ai                  # 7 ataques simulados, só detecção, offline
 sentiel demo -m ollama/llama3.1:8b    # o mesmo, com triagem por IA local
 
-cp sentiel.example.toml sentiel.toml  # edite modelo, fontes e notificações
 sentiel doctor                        # confere config, banco, regras, fontes, modelo e notificações
 sentiel scan                          # uma passada nos seus logs
 sentiel watch                         # monitoramento contínuo
@@ -71,7 +80,31 @@ sentiel rules test minha_regra.yml eventos.jsonl
 sentiel bench ollama/llama3.1:8b,anthropic/claude-sonnet-5-5
 ```
 
-Para rodar como serviço, use `contrib/sentiel.service` no Linux (systemd) ou `contrib/sentiel-task.xml` no Windows (Agendador de Tarefas). Os passos estão no cabeçalho de cada arquivo. As chaves dos provedores de LLM vêm só do ambiente: use `/etc/sentiel/env` no Linux e variáveis de máquina no Windows.
+Para configurar, baixe a config de exemplo (o pacote do pipx não a inclui) e edite modelo, fontes e notificações. Se você clonou o repositório, basta copiar: `cp sentiel.example.toml sentiel.toml`.
+
+Windows (PowerShell):
+
+```
+Invoke-WebRequest https://raw.githubusercontent.com/shinitihm/Sentiel/main/sentiel.example.toml -OutFile sentiel.toml
+```
+
+Linux e macOS:
+
+```
+curl -o sentiel.toml https://raw.githubusercontent.com/shinitihm/Sentiel/main/sentiel.example.toml
+```
+
+Para rodar como serviço, use `contrib/sentiel.service` no Linux (systemd) ou `contrib/sentiel-task.xml` no Windows (Agendador de Tarefas). Os passos estão no cabeçalho de cada arquivo. Para eventos do Sysmon no Windows, veja [contrib/sysmon.md](https://github.com/shinitihm/Sentiel/blob/main/contrib/sysmon.md). As chaves dos provedores de LLM vêm só do ambiente: use `/etc/sentiel/env` no Linux e variáveis de máquina no Windows.
+
+### Benchmark de modelos
+
+`sentiel bench MODELOS --readme` roda os ataques da demo em cada modelo e atualiza a tabela abaixo (`--readme-file CAMINHO` escolhe outro arquivo). Precisa dos dois marcadores e falha sem tocar no arquivo se faltarem.
+
+<!-- BENCH:START -->
+| Modelo | Severidade | Recall MITRE | JSON válido na 1ª | Prompt injection | Latência média | Custo |
+|---|---|---|---|---|---|---|
+| ainda não rodou | - | - | - | - | - | - |
+<!-- BENCH:END -->
 
 ### Estendendo o Sentiel
 
@@ -105,6 +138,8 @@ Para contribuir com o Sentiel, siga estas etapas:
 4. Envie para o seu fork: `git push origin <nome_branch>`.
 5. Abra o pull request.
 
+O guia completo está em [CONTRIBUTING.md](https://github.com/shinitihm/Sentiel/blob/main/CONTRIBUTING.md) (em inglês): como adicionar uma regra só com um arquivo YAML e um `.jsonl`, estilo e princípios. Para reportar uma vulnerabilidade, veja [SECURITY.md](https://github.com/shinitihm/Sentiel/blob/main/SECURITY.md). As mudanças por versão estão em [CHANGELOG.md](https://github.com/shinitihm/Sentiel/blob/main/CHANGELOG.md).
+
 Você também pode consultar a documentação do GitHub sobre [como criar um pull request](https://help.github.com/en/github/collaborating-with-issues-and-pull-requests/creating-a-pull-request).
 
 ## 🤝 Colaboradores
@@ -126,8 +161,8 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
 
 ## 😄 Seja um dos contribuidores
 
-Quer fazer parte desse projeto? Abra uma issue ou um pull request. O guia `CONTRIBUTING.md` chega na v1.0.
+Quer fazer parte desse projeto? Abra uma issue (há modelos para novas regras e falsos positivos) ou um pull request, e leia antes o [CONTRIBUTING.md](https://github.com/shinitihm/Sentiel/blob/main/CONTRIBUTING.md).
 
 ## 📝 Licença
 
-Esse projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+Esse projeto está sob a licença MIT. Veja o arquivo [LICENSE](https://github.com/shinitihm/Sentiel/blob/main/LICENSE) para mais detalhes.
