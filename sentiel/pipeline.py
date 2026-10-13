@@ -250,7 +250,7 @@ def scan(conn: sqlite3.Connection, cfg: Config, *, ai: bool = True, http: httpx.
         try:  # outside the detection transaction; a triage bug must not skip notify and heartbeat
             triage_pending(conn, cfg, summary, http, mock_response)
         except Exception as e:
-            summary.warnings.append(f"triage failed: {e}")
+            summary.warnings.append(f"triage failed: {type(e).__name__}")
             summary.pending = store.count_pending(conn)
     else:
         if ai:

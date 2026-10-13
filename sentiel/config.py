@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import tomllib
+import unicodedata
 from pathlib import Path
 from typing import Literal
 
@@ -12,6 +13,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -30,6 +32,7 @@ ENV_NOTIFY = {
 
 
 class FileSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     path: str
     regex: str
     product: Literal["windows", "linux", "json"] = "json"
@@ -47,6 +50,7 @@ class FileSource(BaseModel):
 
 
 class Sources(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     windows: bool = sys.platform == "win32"
     linux_auth: str | None = "/var/log/auth.log" if Path("/var/log/auth.log").exists() else None
     json_files: list[str] = Field(default_factory=list, alias="json")
@@ -87,6 +91,7 @@ class Suppress(BaseModel):
 
 
 class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     model: str = "ollama/llama3.1:8b"
     interval: int = Field(30, ge=1)
     llm_timeout: int = Field(120, ge=5)
@@ -104,12 +109,41 @@ class Config(BaseModel):
     keys: dict[str, str] = Field(default_factory=dict)
     notify: dict[str, str] = Field(default_factory=dict)
 
+    @field_validator("keys", "notify")
+    @classmethod
+    def _known_names(cls, v: dict[str, str], info: ValidationInfo) -> dict[str, str]:
+        valid = ENV_KEYS if info.field_name == "keys" else ENV_NOTIFY
+        for name in v:
+            if name not in valid:
+                raise ValueError(f"unknown key '{clean_text(name, 80)}' in [{info.field_name}] "
+                                 f"(valid: {', '.join(valid)})")
+        return v
+
+
+def clean_text(text: str, limit: int | None = None, *, keep_newlines: bool = False) -> str:
+    """Untrusted text made printable: control/format/separator characters (Cc, Cf, Zl, Zp) become '?'.
+
+    With `limit`, longer text is cut and ends in '...'. Plain spaces are kept.
+    """
+    if limit is not None and len(text) > limit:
+        text = text[:limit - 3] + "..."
+    return "".join("?" if unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") and not (keep_newlines and c == "\n")
+                   else c for c in text)
+
 
 def describe_error(e: Exception) -> str:
-    """Short config error text. For validation errors only field path and message: never the offending input."""
+    """Short config error text. For validation errors only field path and message: never the offending input.
+
+    Key names come from the (possibly hostile) file: they are cleaned of terminal controls and capped.
+    """
     if isinstance(e, ValidationError):
-        return "; ".join(f"{'.'.join(map(str, x['loc']))}: {x['msg']}" for x in e.errors())
-    return str(e)
+        errors = e.errors()
+        parts = [f"{'.'.join(clean_text(str(p), 80) for p in x['loc'])}: {clean_text(x['msg'], 300)}"
+                 for x in errors[:10]]
+        if len(errors) > 10:
+            parts.append(f"... and {len(errors) - 10} more")
+        return clean_text("; ".join(parts), 1500)
+    return clean_text(str(e), 500, keep_newlines=True)
 
 
 def load_config(path: str | Path = "sentiel.toml") -> Config:

@@ -36,13 +36,13 @@ def send(cfg: dict[str, str], text: str, client: httpx.Client | None = None) -> 
             r = client.post(f"https://api.telegram.org/bot{cfg['telegram_bot_token']}/sendMessage",
                             json={"chat_id": cfg["telegram_chat_id"], "text": text})
             ok["telegram"] = r.is_success
-        except httpx.HTTPError:
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError):  # never include the URL: it holds the token
             ok["telegram"] = False
     if cfg.get("discord_webhook"):
         try:
             # empty allowed_mentions: model/log text must not be able to @everyone
             r = client.post(cfg["discord_webhook"], json={"content": text, "allowed_mentions": {"parse": []}})
             ok["discord"] = r.is_success
-        except httpx.HTTPError:
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError):
             ok["discord"] = False
     return ok
