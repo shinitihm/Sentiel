@@ -55,6 +55,20 @@ def test_check_members_flags_secrets_and_missing_data():
     assert check_members(clean, "wheel") == []
 
 
+def test_source_version_accepts_single_quotes_and_reports_unreadable(tmp_path, monkeypatch):
+    mod = load_check_dist()
+    (tmp_path / "sentiel").mkdir()
+    init = tmp_path / "sentiel" / "__init__.py"
+    monkeypatch.setattr(mod, "ROOT", tmp_path)
+    init.write_text("__version__ = '9.8.7'\n", encoding="utf-8")
+    assert mod.source_version() == "9.8.7"
+    init.write_text("# no version here\n", encoding="utf-8")
+    assert mod.source_version() == ""
+    (tmp_path / "dist").mkdir()
+    (tmp_path / "dist" / "x.whl").write_bytes(b"")
+    assert any("could not read __version__" in p for p in mod.check_dir(tmp_path / "dist"))
+
+
 def test_check_members_is_case_insensitive_and_any_level():
     check = load_check_dist().check_members
     for bad in ["Sentiel.TOML", "x/.ENV", "DOCS/a", "sentiel/x.DB", "x/sentiel.toml/y", "a/x.db-wal", ".git/config"]:
