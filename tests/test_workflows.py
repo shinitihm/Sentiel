@@ -147,7 +147,8 @@ def test_release_publish_job_uses_trusted_publishing():
     assert publish["permissions"] == {"id-token": "write"}
     uses = [step.get("uses") for step in publish["steps"]]
     assert "pypa/gh-action-pypi-publish@release/v1" in uses
-    assert "actions/download-artifact@v4" in uses
+    # Dependabot bumps action majors (v4 -> v8 broke this assert on main); pin the action, not its version.
+    assert any(str(u).startswith("actions/download-artifact@") for u in uses)
 
 
 def test_release_has_no_pypi_secrets():
@@ -219,3 +220,4 @@ def test_community_files_exist_and_cross_link():
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     for heading in ("[1.0.0]", "[0.4.0]", "[0.3.0]", "[0.2.0]", "[0.1.1]"):
         assert f"## {heading}" in changelog
+
