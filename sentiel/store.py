@@ -114,7 +114,12 @@ def _columns(conn: sqlite3.Connection) -> set[str]:
 
 def ensure_column(conn: sqlite3.Connection, name: str) -> None:
     # NUMERIC: "4625" and 4625 compare equal; NOCASE: Sigma matching is case-insensitive
-    conn.execute(f"ALTER TABLE logs ADD COLUMN {quote(name)} NUMERIC COLLATE NOCASE")
+    try:
+        conn.execute(f"ALTER TABLE logs ADD COLUMN {quote(name)} NUMERIC COLLATE NOCASE")
+    except sqlite3.OperationalError as e:
+        # A concurrent scan on another connection may have added it after our check.
+        if "duplicate column name" not in str(e).lower():
+            raise
 
 
 def query_tolerant(conn: sqlite3.Connection, sql: str, params: list | tuple | dict = ()) -> list[sqlite3.Row]:

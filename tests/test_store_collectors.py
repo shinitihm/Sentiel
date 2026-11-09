@@ -568,3 +568,29 @@ def test_read_windows_classifies_only_known_evtquery_errors(monkeypatch, winerro
     stats = Counter()
     assert list(collectors.read_windows({}, stats, channels=("Sysmon",))) == []
     assert dict(stats) == ({key: 1} if key else {})
+
+
+def test_ensure_column_is_idempotent(tmp_path):
+    conn = store.connect(tmp_path / "s.db")
+    store.ensure_column(conn, "program")
+    store.ensure_column(conn, "program")
+    names = [r[1].lower() for r in conn.execute("PRAGMA table_info(logs)")]
+    assert names.count("program") == 1
+
+
+def test_ensure_column_tolerates_column_added_by_other_connection(tmp_path):
+    path = tmp_path / "s.db"
+    a = store.connect(path)
+    b = store.connect(path)
+    store.ensure_column(a, "program")
+    a.commit()
+    store.ensure_column(b, "program")  # must not raise duplicate column name
+
+
+def test_ensure_column_still_raises_other_errors(tmp_path):
+    import sqlite3
+
+    conn = store.connect(tmp_path / "s.db")
+    conn.close()
+    with pytest.raises(sqlite3.ProgrammingError):
+        store.ensure_column(conn, "program")
