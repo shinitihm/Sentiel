@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -43,3 +44,109 @@ jobs:
       - run: python -m build
       - run: twine check dist/*
       - run: python scripts/check_dist.py dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  deploy:
+    needs: [test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install wheel from build
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install dist/*.whl
+      - name: Run demo
+        shell: bash
+        env:
+          COLUMNS: "120"
+          NO_COLOR: "1"
+        run: |
+          set -euo pipefail
+          sentiel demo --no-ai | tee demo.txt
+      - name: Build page
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          python - <<'PY'
+          import html
+          import os
+          import re
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          import sentiel
+
+          demo = Path("demo.txt").read_text(encoding="utf-8")
+          demo = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", demo)  # remove ANSI se houver
+          sha = os.environ["GITHUB_SHA"]
+          repo_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+          run_url = f"{repo_url}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          built = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+          e = html.escape
+
+          page = f"""<!doctype html>
+          <html lang="en">
+          <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Sentiel demo report</title>
+          <style>
+            :root {{ color-scheme: light dark; --bg: #ffffff; --fg: #1b1f24; --muted: #59636e; --box: #f6f8fa; --line: #d1d9e0; }}
+            @media (prefers-color-scheme: dark) {{ :root {{ --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --box: #151b23; --line: #3d444d; }} }}
+            body {{ margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }}
+            main {{ max-width: 1100px; margin: 0 auto; padding: 32px 16px; }}
+            h1 {{ margin: 0 0 4px; font-size: 1.6rem; }}
+            p {{ margin: 0 0 20px; color: var(--muted); }}
+            dl {{ display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0 0 24px; }}
+            dt {{ color: var(--muted); }}
+            dd {{ margin: 0; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }}
+            a {{ color: inherit; }}
+            pre {{ background: var(--box); border: 1px solid var(--line); border-radius: 8px; padding: 16px; overflow-x: auto; font: 13px/1.45 ui-monospace, monospace; }}
+          </style>
+          </head>
+          <body>
+          <main>
+            <h1>Sentiel demo report</h1>
+            <p>Output of <code>sentiel demo --no-ai</code> on simulated attacks, built by CI on every push to main.</p>
+            <dl>
+              <dt>Version</dt><dd>{e(sentiel.__version__)}</dd>
+              <dt>Commit</dt><dd><a href="{e(repo_url)}/commit/{e(sha)}">{e(sha[:12])}</a></dd>
+              <dt>Built</dt><dd>{e(built)}</dd>
+              <dt>Run</dt><dd><a href="{e(run_url)}">{e(os.environ['GITHUB_RUN_ID'])}</a></dd>
+            </dl>
+            <pre>{e(demo)}</pre>
+          </main>
+          </body>
+          </html>
+          """
+          Path("site/index.html").write_text(page, encoding="utf-8")
+          PY
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/
+      - id: deployment
+        uses: actions/deploy-pages@v5
