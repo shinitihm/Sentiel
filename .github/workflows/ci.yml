@@ -28,7 +28,7 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       - run: ruff check .
-      - run: pytest -q
+      - run: pytest -q --durations=10
       - run: sentiel demo --no-ai
 
   build:
@@ -44,9 +44,15 @@ jobs:
       - run: python -m build
       - run: twine check dist/*
       - run: python scripts/check_dist.py dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
 
   # CD: roda so em push na main e so se test + build passaram.
-  # Publica no GitHub Pages uma pagina estatica com a saida da demo e os pacotes (wheel/sdist).
+  # Publica no GitHub Pages o wheel/sdist que passou na CI (artefato do job build, sem rebuild)
+  # junto com a saida da demo, e confere que o site no ar mostra o build publicado.
   deploy:
     needs: [test, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -62,22 +68,21 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-          cache: pip
-      - run: pip install -e . build
-      - run: python -m build
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - run: pip install dist/*.whl
       - name: Gerar site estatico
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p site/dist
           cp dist/* site/dist/
-          sentiel demo --no-ai > demo.txt 2>&1 || true
+          sentiel demo --no-ai > demo.txt 2>&1
           {
             echo "<!doctype html><meta charset=utf-8><title>Sentiel</title>"
             echo "<h1>Sentiel</h1><p>Build de ${GITHUB_SHA::7} (main).</p>"
@@ -93,3 +98,29 @@ jobs:
           path: site
       - id: deployment
         uses: actions/deploy-pages@v4
+      - name: Verificar site publicado
+        shell: bash
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          short="${GITHUB_SHA::7}"
+          wheel="$(basename dist/*.whl)"
+          for i in $(seq 1 12); do
+            if curl -fsSL "${PAGE_URL}?v=${GITHUB_SHA}" | grep -q "Build de ${short}"; then
+              curl -fsSLI "${PAGE_URL}dist/${wheel}" > /dev/null
+              {
+                echo "### Deploy verificado"
+                echo ""
+                echo "- Site: ${PAGE_URL}"
+                echo "- Build no ar: \`${short}\`"
+                echo "- Wheel publicado: \`${wheel}\`"
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "Site no ar com o build ${short}"
+              exit 0
+            fi
+            echo "Tentativa ${i}: site ainda sem o build ${short}"
+            sleep 10
+          done
+          echo "::error::Site publicado nao mostra o build ${short}"
+          exit 1
