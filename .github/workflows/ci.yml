@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -43,3 +44,52 @@ jobs:
       - run: python -m build
       - run: twine check dist/*
       - run: python scripts/check_dist.py dist
+
+  # CD: roda so em push na main e so se test + build passaram.
+  # Publica no GitHub Pages uma pagina estatica com a saida da demo e os pacotes (wheel/sdist).
+  deploy:
+    needs: [test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e . build
+      - run: python -m build
+      - name: Gerar site estatico
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p site/dist
+          cp dist/* site/dist/
+          sentiel demo --no-ai > demo.txt 2>&1 || true
+          {
+            echo "<!doctype html><meta charset=utf-8><title>Sentiel</title>"
+            echo "<h1>Sentiel</h1><p>Build de ${GITHUB_SHA::7} (main).</p>"
+            echo "<h2>sentiel demo --no-ai</h2><pre>"
+            python -c "import html,sys; print(html.escape(open('demo.txt',encoding='utf-8',errors='replace').read()))"
+            echo "</pre><h2>Pacotes</h2><ul>"
+            for f in dist/*; do echo "<li><a href=\"dist/$(basename "$f")\">$(basename "$f")</a></li>"; done
+            echo "</ul>"
+          } > site/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
