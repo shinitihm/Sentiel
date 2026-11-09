@@ -107,8 +107,9 @@ jobs:
           short="${GITHUB_SHA::7}"
           wheel="$(basename dist/*.whl)"
           for i in $(seq 1 12); do
-            if curl -fsSL "${PAGE_URL}?v=${GITHUB_SHA}" | grep -q "Build de ${short}"; then
-              curl -fsSLI "${PAGE_URL}dist/${wheel}" > /dev/null
+            page="$(curl -fsSL "${PAGE_URL}?v=${GITHUB_SHA}")" || page=""
+            if grep -q "Build de ${short}" <<<"$page"; then
+              curl -fsSLI --retry 3 "${PAGE_URL}dist/${wheel}" > /dev/null || { echo "::error::Wheel ${wheel} nao responde no site publicado"; exit 1; }
               {
                 echo "### Deploy verificado"
                 echo ""

@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import time
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
@@ -588,9 +589,11 @@ def test_ensure_column_tolerates_column_added_by_other_connection(tmp_path):
 
 
 def test_ensure_column_still_raises_other_errors(tmp_path):
-    import sqlite3
-
-    conn = store.connect(tmp_path / "s.db")
-    conn.close()
-    with pytest.raises(sqlite3.ProgrammingError):
-        store.ensure_column(conn, "program")
+    p = tmp_path / "s.db"
+    store.connect(p).close()
+    ro = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            store.ensure_column(ro, "program")
+    finally:
+        ro.close()
