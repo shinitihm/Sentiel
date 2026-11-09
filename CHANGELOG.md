@@ -2,6 +2,15 @@
 
 All notable changes to Sentiel are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- CI/CD: `.github/workflows/ci.yml` now runs on pushes and pull requests to `main` and, after `test`, `build` and the new `container` job pass on a push to `main`, a `deploy` job publishes the Docker image to `ghcr.io/shinitihm/sentiel` (`latest`, `main`, `sha-<commit>`) and verifies the published image (pull, `version`, `demo --no-ai`).
+- `Dockerfile` (non-root, installs the wheel that passed CI) and `scripts/image_check.py`.
+
+### Fixed
+- CI on `main` was red since Dependabot bumped `actions/download-artifact` to v8: `tests/test_workflows.py` pinned `@v4`. The test now checks the action, not its major version.
+
 ## [1.0.0] - unreleased (tag v1.0.0 pending)
 
 The version is set to 1.0.0 in the code, but it is not published yet. The maintainer replaces "unreleased (tag v1.0.0 pending)" with the release date when tagging `v1.0.0`.
