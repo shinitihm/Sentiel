@@ -219,3 +219,4 @@ def test_community_files_exist_and_cross_link():
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     for heading in ("[1.0.0]", "[0.4.0]", "[0.3.0]", "[0.2.0]", "[0.1.1]"):
         assert f"## {heading}" in changelog
+
