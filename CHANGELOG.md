@@ -2,9 +2,7 @@
 
 All notable changes to Sentiel are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/).
 
-## [1.0.0] - unreleased (tag v1.0.0 pending)
-
-The version is set to 1.0.0 in the code, but it is not published yet. The maintainer replaces "unreleased (tag v1.0.0 pending)" with the release date when tagging `v1.0.0`.
+## [1.0.0] - 2026-11-23
 
 ### Added
 - Release to PyPI: `pipx install sentiel`. Tags `vX.Y.Z` trigger `.github/workflows/release.yml`, which checks the tag against `sentiel.__version__`, builds the sdist and wheel and publishes with PyPI trusted publishing (no token).

@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,17 @@ def test_ci_matrix_includes_314_as_informative():
     test_job = doc["jobs"]["test"]
     assert "3.14" in test_job["strategy"]["matrix"]["python"]
     assert test_job["continue-on-error"] == "${{ matrix.python == '3.14' }}"
+
+
+def test_ci_matrix_covers_three_oses():
+    matrix = load("workflows/ci.yml")["jobs"]["test"]["strategy"]["matrix"]
+    assert set(matrix["os"]) == {"ubuntu-latest", "windows-latest", "macos-latest"}
+
+
+def test_pyproject_declares_macos():
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    classifiers = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["classifiers"]
+    assert "Operating System :: MacOS" in classifiers
 
 
 def test_ci_has_build_job_checking_dist():
