@@ -115,7 +115,7 @@ Each release:
 
 1. Make sure CI is green on the exact commit you will tag. The release workflow does **not** run `pytest`; it only builds, checks the distribution and publishes.
 2. Set the version in `sentiel/__init__.py` (the only place; `pyproject.toml` reads it).
-3. Update `CHANGELOG.md`: put the release date on the new version heading (for 1.0.0, replace "unreleased (tag v1.0.0 pending)" with the date).
+3. Update `CHANGELOG.md`: add a `## [X.Y.Z] - YYYY-MM-DD` heading with the release date and the changes of this version.
 4. Check that the README (the page PyPI shows) describes the state of this release: roadmap, install steps and links. A PyPI page cannot be changed for a published version. Then tag and push only that tag:
 
    ```
